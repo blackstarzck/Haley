@@ -249,7 +249,9 @@ Fake out / Trap은 레벨을 분리한다.
 
 Trap 확정은 기준 레벨 이탈, `reclaim_window` 안의 종가 복귀, 반대 방향 `min_follow_through_atr` 이상 진행 또는 반응 캔들/거래량/호가 조건 중 최소 2개 확인을 요구한다.
 
-## 4. Bright Data MCP 조사 및 팩트 체크
+## 4. 조사 기록 및 팩트 체크
+
+아래 Bright Data MCP 실행 내역은 작성 당시의 조사 기록이며, 이 전략 구현의 필수 도구 요구사항이 아니다. 실제 구현과 최종 검증 근거는 업비트 공식 문서, 공식 릴리즈 노트, 실제 API 응답을 우선한다.
 
 Bright Data MCP는 로컬 래퍼 `C:\Users\buche\.codex\brightdata-mcp.cmd`로 실행해 `search_engine` 도구를 호출했다. 확인된 MCP 상태:
 
@@ -286,6 +288,16 @@ Bright Data MCP는 로컬 래퍼 `C:\Users\buche\.codex\brightdata-mcp.cmd`로 �
 | 추세선/채널을 수동 방식 그대로 구현 | 부적합 | 수동 작도는 주관적이다. 피벗/회귀 기반 규칙으로 바꿔야 한다. |
 | Fake out/Trap 자동 검출 | 가능 | 이전 고점/저점 돌파 후 종가 복귀, 꼬리 비율, 거래량 조건으로 수치화 가능하다. |
 | 이미지 전략이 장기적으로 수익 보장 | 불가 | 공개 기술적 분석 패턴은 시장/기간/비용에 따라 성과가 크게 달라진다. 반드시 백테스트와 실거래 전 모의 검증 필요. |
+
+### 4.1 추가 토론 기반 판정
+
+2026-05-28 별도 검토 에이전트 토론 결과, 이 문서는 "전략 아이디어/프로토타입 검증 명세"로는 타당하지만, 아래 제약이 구현되고 실 API 응답으로 재검증되기 전에는 `LIVE` 실거래 운영 명세로 간주하지 않는다.
+
+- 업비트 현물 주문 API에서 일반적인 거래소 서버 측 stop-loss/trigger/stop-market 주문 유형은 확인되지 않았다. 손절은 봇이 감시하다가 매도 주문을 제출하는 구조로 명시해야 한다.
+- `PAPER`는 업비트 공식 샌드박스가 아니라 내부 모의매매다. `/v1/orders/test`는 실제 주문을 만들지 않는 사전 검증 API일 뿐 체결/조회/취소가 이어지는 paper trading 환경이 아니다.
+- `market_event.caution`은 객체이므로 객체 자체의 truthy 여부가 아니라 내부 경보 값 중 하나라도 `true`인지 확인해야 한다.
+- 6개월 백테스트와 200건 기준은 탐색 기준으로는 가능하지만, 실거래 후보 판정 기준으로는 부족하다. 실거래 후보는 12~24개월 또는 여러 장세를 포함한 검증으로 격상한다.
+- 과거 호가, 뉴스, 김치프리미엄, `market_event`는 시점별 저장 로그가 없으면 백테스트 hard block에 사용하지 않는다.
 
 ## 5. 업비트 API 데이터 기준 구현 가능성
 
@@ -342,14 +354,17 @@ Bright Data MCP는 로컬 래퍼 `C:\Users\buche\.codex\brightdata-mcp.cmd`로 �
 
 - 시장가 매수는 `side=bid`, `ord_type=price`, `price=KRW 주문금액`, `volume` 제외로 요청한다.
 - 시장가 매도는 `side=ask`, `ord_type=market`, `volume=매도수량`, `price` 제외로 요청한다.
-- 지정가 주문 가격은 KRW 마켓 호가 단위에 맞게 보정하고, 총 주문금액은 최소 주문금액 이상이어야 한다.
-- 주문 생성 전 주문 가능 정보와 잔고를 확인해 주문 가능 금액, locked 금액, 예상 수수료를 반영한다.
+- 지정가 주문은 `ord_type=limit`, 최유리 주문은 `ord_type=best`를 사용한다. `best` 주문은 `time_in_force` 조건과 함께 사용하며, 전량 체결을 보장하지 않는다.
+- 현재 공식 주문 유형은 `limit`, `price`, `market`, `best`로 제한해 설계한다. stop-loss, stop-market, trigger 주문 유형이 공식 문서에 새로 추가되기 전까지 손절은 거래소 서버에 예약하는 주문이 아니라 봇 관리 감시/청산 로직으로 구현한다.
+- 지정가 주문 가격은 KRW 마켓 호가 단위에 맞게 보정하고, 총 주문금액은 최소 주문금액 이상이어야 한다. KRW 마켓 최소 주문 가능 금액은 구현 직전 공식 문서에서 재확인하되, 현재 기준은 5,000 KRW다.
+- 주문 생성 전 `GET /v1/orders/chance`로 `bid_types`, `ask_types`, 수수료율, 최소/최대 주문 가능 금액, 잔고, locked 금액을 확인한다. deprecated 예정인 `market.order_types` 대신 `market.bid_types`와 `market.ask_types`를 기준으로 한다.
+- `/v1/orders/test`는 실주문 생성 전 요청 형식과 주문 가능 상태를 확인하는 preflight 검증으로만 사용한다. 실제 체결, 주문 조회, 취소가 가능한 공식 paper trading 환경으로 취급하지 않는다.
 - private WebSocket 주문/자산 이벤트는 초기 스냅샷이 아니므로, 시작/재시작 시 REST 잔고와 미체결 주문 조회로 bootstrap한 뒤 private WebSocket을 붙인다.
-- REST 요청은 그룹별 토큰 버킷으로 제한하고, 응답의 `Remaining-Req`를 기준으로 속도를 조절한다.
+- REST 요청은 그룹별 토큰 버킷으로 제한하고, 응답의 `Remaining-Req`를 기준으로 속도를 조절한다. `Remaining-Req`의 `sec`를 현재 잔여 요청 수로 사용하고, deprecated 된 `min` 값은 판단에 사용하지 않는다.
 - 429 응답은 지수 백오프, 418 응답은 응답의 차단 시간 동안 거래 중단으로 처리한다.
 - API 키는 자산 조회, 주문 조회, 주문하기에 필요한 최소 권한만 부여하고 출금 권한은 제외한다.
 - API 키와 JWT, nonce, query hash, Secret은 로그에 남기지 않는다.
-- `client_order_key`는 내부 중복 주문 방지에 사용하고, 업비트 주문 `identifier`는 실제 주문 제출마다 계정 전체에서 영구적으로 유일한 값으로 생성한다.
+- `client_order_key`는 내부 중복 주문 방지에 사용하고, 업비트 주문 `identifier`는 실제 주문 제출마다 계정 전체에서 영구적으로 유일한 값으로 생성한다. `identifier`는 최대 32자 제한 안에서 만들고, 주문 생성/체결 여부와 무관하게 재사용하지 않는다.
 
 ### 5.5 Upbit-only 운영 모드
 
@@ -386,10 +401,20 @@ Bright Data MCP는 로컬 래퍼 `C:\Users\buche\.codex\brightdata-mcp.cmd`로 �
 - 스프레드가 `max_spread_pct` 이하.
 - 최근 24시간 거래대금이 `min_daily_value` 이상.
 - 비정상 급등락, 거래 정지, API 오류 종목 제외.
-- `GET /v1/market/all?is_details=true` 기준 `market_event.warning == true` 또는 `market_event.caution`에 하나 이상의 경보가 있으면 신규 진입 금지.
+- `GET /v1/market/all?is_details=true` 기준 `market_event.warning == true` 또는 `Object.values(market_event.caution ?? {}).some(Boolean) == true`이면 신규 진입 금지.
 - 상장폐지, 거래지원 종료, 유의종목 지정, 투자유의/주의/경고/위험 공지가 확인된 종목은 즉시 위험 자산 목록에 올리고 신규 매수 금지.
-- 보유 중인 종목이 위험 자산 목록에 들어가면 자동 물타기와 추가 매수는 금지하고, 유동성/스프레드가 허용 범위일 때 단계적 청산 또는 전량 청산 규칙을 실행한다.
+- 보유 중인 종목이 위험 자산 목록에 들어가면 자동 물타기와 추가 매수는 금지하고, 열린 매수 주문을 취소한 뒤 원인별 action matrix에 따라 보유분을 유지, 축소, 단계적 청산, 전량 청산 중 하나로 처리한다.
 - 특정 종목의 입출금 중단, 네트워크 장애, 체결량 급감, 호가 공백 확대가 감지되면 신규 진입 금지.
+
+위험 자산 action matrix:
+
+| 상태 | 신규 진입 | 미체결 주문 | 보유 포지션 |
+|---|---|---|---|
+| `BLOCK_ENTRY` | 금지 | 유지 가능 | 기존 손절/익절 관리 유지 |
+| `CANCEL_OPEN_ORDERS` | 금지 | 모든 신규/추가 매수 주문 취소 | 기존 손절/익절 관리 유지 |
+| `REDUCE_ONLY` | 금지 | 매수 주문 취소, 매도 주문만 허용 | 추가 매수 금지, 유리한 유동성에서 비중 축소 |
+| `LIQUIDITY_CONDITIONAL_EXIT` | 금지 | 매수 주문 취소 | 스프레드/호가잔량이 허용 범위일 때 단계적 청산 |
+| `LIQUIDATE_ALL` | 금지 | 모든 미체결 주문 취소 | 급박한 거래지원 종료, 치명적 장애, 수동 킬스위치 때 전량 청산 |
 
 추세 필터:
 
@@ -524,13 +549,18 @@ Hard block 조건:
 stop = min(fakeout_low, ob_low, fvg_low) - ATR(14) * 0.1
 ```
 
-손절 주문 원칙:
+봇 관리 손절 원칙:
 
-- 진입 주문이 체결되면 즉시 손절 주문 또는 손절 감시 상태가 생성되어야 한다.
+- 업비트 현물 기준 손절은 거래소 서버 측 stop-loss 주문이 아니라 봇 관리 손절이다. 공식 주문 유형에 stop/trigger 주문이 추가되기 전까지, 손절가는 내부 `StopWatch` 상태로 저장하고 조건 충족 시 봇이 매도 주문을 제출한다.
+- 진입 주문이 체결되면 즉시 손절 감시 상태가 생성되어야 하며, 서버 측 손절 보호가 없다는 사실을 포지션 리스크에 반영한다.
+- 손절 감시는 WebSocket trade/orderbook/ticker와 REST 보정 가격을 함께 사용한다. WebSocket이 stale 상태이거나 REST 보정이 실패하면 신규 진입을 금지하고 기존 포지션은 `RECOVERY_ONLY` 또는 원인별 청산 정책으로 전환한다.
+- `stop_detection_sla_ms`, `stop_submit_sla_ms`, `stop_retry_max`, `emergency_exit_slippage_pct`를 운영 파라미터로 두고, SLA 초과와 주문 실패는 즉시 알림과 circuit breaker 사유로 기록한다.
 - 손절 가격이 진입가보다 높거나 같게 계산되거나, `unit_risk <= 0`이면 주문을 내지 않는다.
 - 손절 폭이 `min_stop_pct`보다 작으면 수수료/슬리피지에 취약하므로 진입 금지.
 - 손절 폭이 `max_stop_pct`보다 크면 포지션 크기를 축소하고, 축소 후 최소 주문 금액 미만이면 진입 금지.
+- 손절 트리거 시 기본 청산은 `side=ask`, `ord_type=market` 시장가 매도다. 유동성과 스프레드가 허용 범위이고 즉시 체결 가능성이 높을 때만 최유리 `best` 또는 공격 지정가를 사용할 수 있다.
 - 급락으로 손절가를 건너뛰면 지정가 고집 금지. `emergency_exit_slippage_pct` 안에서는 시장가 또는 즉시 체결 가능한 가격으로 청산한다.
+- 봇 프로세스 장애, 네트워크 단절, 인증 실패 중에는 손절 체결이 보장되지 않는다. 이 위험은 포지션 크기, 최대 노출, 실거래 승인 게이트의 P0 제약으로 다룬다.
 
 무효화 조건:
 
@@ -602,12 +632,22 @@ position_size_krw = min(raw_position_size_krw, max_symbol_exposure, liquidity_ca
 - 미체결 주문 취소 실패, 잔고 불일치, 체결 이벤트 누락, WebSocket/REST 가격 괴리 발생.
 - 업비트 또는 주요 외부 데이터 소스 장애, 거래소 점검, 네트워크 지연 급증.
 - 위험 자산 목록 편입, 상장폐지/거래지원 종료 공지, 유의종목 또는 주의 경보 감지.
-- 김치프리미엄/뉴스 리스크 필터가 `blocked` 또는 `unknown` 상태.
+- `EXTERNAL_RISK_FILTER_ENABLED=true`인 상태에서 김치프리미엄/뉴스 리스크 필터가 `blocked` 또는 `unknown` 상태.
 
 거래 재개:
 
 - 중단 사유가 해소되고 `cooldown_minutes`가 지난 뒤에만 수동 승인 또는 보수적 자동 재개를 허용한다.
 - 재개 첫 24시간은 `risk_per_trade`를 기본값의 50% 이하로 낮춘다.
+
+장애 액션은 단일 kill switch가 아니라 원인별로 분리한다.
+
+| 원인 | 모드 | 주문 액션 | 포지션 액션 |
+|---|---|---|---|
+| 데이터 stale, REST/WebSocket 불일치 | `BLOCK_ENTRY` | 신규 진입 금지 | 기존 손절 감시 유지, 보정 실패 시 `RECOVERY_ONLY` |
+| 주문 API 429/418, 인증 실패 | `RECOVERY_ONLY` | 신규 주문 금지, 미체결 조회 우선 | 청산 주문도 실패 가능성을 기록하고 수동 알림 |
+| 잔고/미체결 불일치, `UNKNOWN` 주문 | `RECOVERY_ONLY` | 동일 마켓 재주문 금지 | 거래소 조회로 상태 확정 전 추가 액션 금지 |
+| 일 손실/연속 손절 초과 | `KILL_SWITCHED` | 신규 진입 금지, 미체결 매수 취소 | 보유분은 기존 손절 또는 단계 청산 정책 적용 |
+| 거래지원 종료, 치명적 장애, 수동 전량 청산 | `KILL_SWITCHED` | 모든 미체결 주문 취소 | 유동성 조건 확인 후 `LIQUIDATE_ALL` |
 
 ## 7. 시스템 아키텍처
 
@@ -680,7 +720,9 @@ client_order_key = hash(strategy_id, strategy_version, market, side, signal_cand
 
 동일한 `client_order_key`에 대해 `PLANNED`, `SUBMITTING`, `ACCEPTED`, `PARTIALLY_FILLED`, `UNKNOWN` 상태 주문이 존재하면 신규 주문을 생성하지 않는다. `UNKNOWN`, `SUBMITTING`, `PARTIALLY_FILLED` 주문이 있는 마켓은 거래소 조회로 상태가 확정될 때까지 신규 진입을 금지한다.
 
-`client_order_key`는 전략 내부의 논리적 신호 중복 방지 키이며, 업비트 주문 요청의 `identifier`와 동일하게 취급하지 않는다. 업비트 `identifier`는 실제 주문 제출 시마다 계정 전체에서 영구적으로 유일한 값으로 생성한다. 주문 제출 응답을 받지 못한 경우에도 같은 `identifier`를 재사용하지 않고, 내부 `client_order_key`와 새 `exchange_identifier`의 매핑을 `OrderState`에 기록한 뒤 거래소 조회로 확정한다.
+`client_order_key`는 전략 내부의 논리적 신호 중복 방지 키이며, 업비트 주문 요청의 `identifier`와 동일하게 취급하지 않는다. 업비트 `identifier`는 실제 주문 제출 시마다 계정 전체에서 영구적으로 유일한 값으로 생성하고, 최대 32자 제한을 넘지 않는다.
+
+주문 제출 응답을 받지 못한 경우에는 해당 시도의 `identifier`를 `OrderAttempt`로 반드시 저장하고 주문 상태를 `UNKNOWN`으로 둔다. 원주문이 실제로 생성되었을 가능성이 있으므로, 거래소 주문 조회로 해당 `identifier` 또는 관련 주문 상태가 확정되기 전까지 같은 `client_order_key`와 같은 마켓으로 새 `identifier`를 발급해 재주문하지 않는다. 새 `identifier`는 이전 시도가 `REJECTED`, `CANCELLED`, `NOT_FOUND_CONFIRMED` 등으로 확정된 뒤에만 생성한다.
 
 ### 7.5 주문 상태 머신
 
@@ -716,8 +758,8 @@ API 장애:
 
 - 429, 5xx, timeout 발생 시 지수 백오프를 적용한다.
 - 주문 생성 응답을 받지 못하면 주문 상태를 `UNKNOWN`으로 저장한다.
-- `UNKNOWN` 상태가 존재하는 동안 같은 마켓 신규 주문은 금지한다.
-- 거래소 주문 조회로 실제 주문 존재 여부를 확인한 뒤 상태를 확정한다.
+- `UNKNOWN` 상태가 존재하는 동안 같은 마켓 신규 주문과 같은 신호 재주문은 금지한다.
+- 모든 주문 시도 `identifier`를 저장하고, 거래소 주문 조회로 실제 주문 존재 여부를 확인한 뒤 상태를 확정한다.
 
 네트워크/WebSocket 단절:
 
@@ -751,11 +793,22 @@ API 장애:
 ### 7.7 운영 모드
 
 - `BACKTEST`: 과거 데이터 검증.
-- `PAPER`: 실시간 데이터 기반 모의 매매.
+- `PAPER`: 업비트 공식 샌드박스가 아니라 내부 체결 모델을 사용하는 실시간 데이터 기반 모의 매매.
 - `DRY_RUN`: 주문 직전까지 실행하되 실제 주문 API는 호출하지 않음.
-- `LIVE`: 실거래 모드.
+- `PREFLIGHT`: 실제 주문 생성 없이 `/v1/orders/test`로 주문 요청 형식과 주문 가능 상태만 검증.
+- `LIVE`: 실거래 모드. 기본값은 비활성화이며, live gate를 모두 통과해야만 켤 수 있다.
 - `RECOVERY_ONLY`: 복구/대조만 수행하고 신규 주문 금지.
-- `KILL_SWITCHED`: 모든 신규 주문 금지, 열린 주문 정리와 알림만 수행.
+- `KILL_SWITCHED`: 모든 신규 주문 금지, 열린 주문 정리, 원인별 보유 포지션 처리, 알림 수행.
+
+`LIVE` 활성화 게이트:
+
+- 설정 기본값은 `LIVE_ENABLED=false`다.
+- API 키 권한, IP 허용 목록, 주문하기/주문조회 권한, 출금 권한 미부여 상태를 확인한다.
+- 대상 마켓별 `orders/chance`와 `/v1/orders/test`를 통과해야 한다.
+- 계정 전체 reconciliation이 clean 상태여야 하며 `UNKNOWN`, `CANCEL_FAILED`, 잔고 불일치가 없어야 한다.
+- `max_live_order_krw`, `max_daily_loss`, `max_order_count_per_day`, `max_total_crypto_exposure`가 설정되어야 한다.
+- 첫 실거래는 최소 주문금액 수준의 소액 live 단계로 시작하고, 수동 승인 플래그 없이는 증액하지 않는다.
+- kill switch 파일/DB 플래그와 알림 채널이 정상 동작해야 한다.
 
 ## 8. 구현 명세
 
@@ -830,6 +883,15 @@ class OrderIntent:
     status: str
     created_ts: int
 
+class OrderAttempt:
+    client_order_key: str
+    exchange_identifier: str
+    attempt_no: int
+    request_ts: int
+    response_ts: int | None
+    status: str  # SUBMITTED, UNKNOWN, REJECTED, NOT_FOUND_CONFIRMED
+    last_error: str | None
+
 class OrderState:
     client_order_key: str
     exchange_order_id: str | None
@@ -843,6 +905,17 @@ class OrderState:
     avg_fill_price: float | None
     last_error: str | None
     updated_ts: int
+
+class StopWatch:
+    position_id: str
+    market: str
+    stop_price: float
+    status: str  # armed, triggered, submitted, filled, failed
+    detection_deadline_ms: int
+    submit_deadline_ms: int
+    retry_count: int
+    last_trigger_ts: int | None
+    last_error: str | None
 
 class Fill:
     exchange_order_id: str
@@ -902,9 +975,14 @@ class ExecutionEvent:
 | `stale_timeout_ms` | 5000 |
 | `min_stop_pct` | 0.20% |
 | `max_stop_pct` | 2.00% |
+| `stop_detection_sla_ms` | 1000 |
+| `stop_submit_sla_ms` | 1000 |
+| `stop_retry_max` | 3 |
 | `max_hold_candles_without_progress` | 12 |
 | `cancel_retry_max` | 3 |
 | `signal_score_threshold` | 70 |
+| `max_live_order_krw` | 별도 수동 설정 |
+| `max_order_count_per_day` | 별도 수동 설정 |
 | `max_intraday_drawdown` | 3% |
 | `max_total_crypto_exposure` | 60% |
 | `max_correlated_exposure` | 35% |
@@ -931,9 +1009,15 @@ base_score = 0
 -30 bearish FVG above price
 -30 upper fake out detected
 -50 kimchi premium/news risk blocked
--80 market_event.warning or caution true
+-80 market_event.warning == true or any(values(market_event.caution ?? {})) == true
 -100 daily loss limit hit
 ```
+
+점수화 보강:
+
+- `market_event.warning` 또는 `market_event.caution`은 점수 감점이 아니라 hard block으로도 처리한다.
+- `FVG + OB + overlap + trap`만으로 점수 임계값을 넘더라도, 15분봉 추세 필터 또는 거래량 impulse 중 최소 하나가 추가로 확인되지 않으면 신규 진입하지 않는다.
+- 호가 불균형은 보조 근거일 뿐이며, 과거 호가 로그로 검증되지 않은 구간에서는 백테스트 점수에 포함하지 않는다.
 
 진입 기준:
 
@@ -980,7 +1064,9 @@ expected_slippage <= max_expected_slippage_pct
 대상:
 
 - KRW-BTC, KRW-ETH, 거래대금 상위 알트 10개.
-- 최소 6개월 이상 1분/5분 캔들.
+- 탐색 단계: 최소 6개월 이상 1분/5분 캔들.
+- 실거래 후보 단계: 최소 12~24개월 또는 상승/하락/횡보/급락/저유동성 구간을 모두 포함하는 다중 장세 데이터.
+- 과거 `market_event`, 호가, 김치프리미엄, 뉴스 필터는 시점별 원천 로그가 있는 기간에만 hard block 백테스트에 사용한다.
 
 비용 가정:
 
@@ -999,8 +1085,8 @@ expected_slippage <= max_expected_slippage_pct
 - 피벗 확정은 오른쪽 캔들 `pivot_right`개가 닫힌 뒤에만 사용.
 - FVG/OB 생성 시점 이후 데이터만 사용.
 - 미체결 주문과 부분 체결을 반영.
-- 유의종목/주의 경보/거래지원 종료 이벤트가 발생한 구간은 신규 진입 금지로 시뮬레이션.
-- 김치프리미엄 급변, 뉴스 리스크, API 장애, 호가 공백 확대를 별도 스트레스 시나리오로 테스트.
+- 유의종목/주의 경보/거래지원 종료 이벤트가 발생한 구간은 시점별 `market_event` 또는 공지 로그가 있는 경우에만 신규 진입 금지로 시뮬레이션한다. 현재 상태를 과거 전체에 소급 적용하지 않는다.
+- 김치프리미엄 급변, 뉴스 리스크, API 장애, 호가 공백 확대는 point-in-time 로그가 없으면 hard block 백테스트가 아니라 별도 스트레스 시나리오로 테스트한다.
 - 손절가 이탈 시 지정가 미체결, 급락 갭, 부분 체결 후 반등 실패 같은 불리한 체결을 보수적으로 반영.
 
 ### 9.1.1 시간 정합성 및 스누핑 방지
@@ -1029,7 +1115,9 @@ expected_slippage <= max_expected_slippage_pct
 
 통계 기준:
 
-- 거래 수 200건 미만인 패턴은 실거래 후보에서 제외한다.
+- 탐색 단계에서는 패턴별 이벤트 수와 전략 전체 거래 수를 분리해 기록한다.
+- 실거래 후보 단계에서는 전략 전체 거래 수, 패턴별 이벤트 수, 마켓별 집중도를 따로 본다. 단일 마켓 또는 단일 1~2주 구간에 성과가 집중되면 탈락시킨다.
+- 조합 조건이 엄격해 200건 미만인 경우 즉시 폐기하지 않고 탐색 후보로만 남긴다. 실거래 후보로 승격하려면 추가 기간 또는 추가 마켓에서 충분한 표본을 확보해야 한다.
 - 부트스트랩 95% 신뢰구간에서 비용 차감 기대값이 0보다 커야 한다.
 - 여러 패턴/파라미터를 동시에 검정한 경우 FDR 또는 White's Reality Check 등으로 다중검정 편향을 보정한다.
 
@@ -1052,7 +1140,7 @@ expected_slippage <= max_expected_slippage_pct
 - 호가 기반 현실 모델: 당시 호가 잔량을 소진하며 VWAP 체결.
 - 스트레스 모델: 슬리피지 2~3배, 부분 체결, 주문 실패, 손절 지연 포함.
 
-호가 불균형과 호가 기반 체결 모델은 과거 호가 로그가 있을 때만 백테스트한다. 공식 REST 캔들만 있는 구간에서는 호가 필터를 사용하지 않거나 별도 실시간 수집 이후 검증한다.
+호가 불균형과 호가 기반 체결 모델은 과거 호가 로그가 있을 때만 백테스트한다. 공식 REST 캔들만 있는 구간에서는 호가 필터를 사용하지 않거나 별도 실시간 수집 이후 검증한다. `market_event`, 뉴스, 김치프리미엄도 동일하게 point-in-time 로그가 없는 기간에는 hard block 성능으로 주장하지 않는다.
 
 ### 9.1.4 워크포워드 합격 기준
 
@@ -1064,6 +1152,8 @@ expected_slippage <= max_expected_slippage_pct
 - 상승장, 하락장, 횡보장, 급등락, 저유동성 구간별 성과를 따로 기록한다.
 
 ### 9.2 페이퍼 트레이딩
+
+`PAPER`는 내부 모의매매 환경이며 업비트 공식 샌드박스가 아니다. `/v1/orders/test`는 `PREFLIGHT` 단계에서 주문 요청 형식과 주문 가능 상태를 검증하는 데만 사용한다.
 
 기간:
 
@@ -1083,14 +1173,22 @@ expected_slippage <= max_expected_slippage_pct
 - 유의종목/주의 경보, 김치프리미엄, 뉴스 리스크, API 장애 상태에서 신규 주문이 차단되는지.
 - 킬스위치 발동 후 미체결 주문 취소, 보유 포지션 관리, 거래 재개 제한이 정상 작동하는지.
 
+한계:
+
+- 페이퍼 트레이딩은 데이터 파이프라인, 신호 재현성, 상태 머신, 리스크 차단 로직을 검증한다.
+- 실제 체결 우선순위, 주문 거절, 급변 슬리피지, 부분 체결 빈도, 손절 지연은 소액 실거래 없이는 완전히 검증할 수 없다.
+
 ### 9.3 소액 실거래
 
 조건:
 
 - 백테스트 기대값 양수.
 - 페이퍼 트레이딩에서 주문/리스크 로직 오류 0건.
+- `DRY_RUN`과 `PREFLIGHT`를 통과하고, `LIVE` 활성화 게이트가 clean 상태.
 - 시작 금액은 손실 가능 금액으로 제한.
-- 첫 2주간 `risk_per_trade`를 0.1%로 축소.
+- 첫 단계는 최소 주문금액 수준 또는 `max_live_order_krw` 이하의 소액 주문으로 시작한다.
+- 첫 2주간 `risk_per_trade`를 0.1% 이하로 축소하고, 실제 체결가와 페이퍼/호가 기반 예상 체결가의 오차를 계량한다.
+- 증액은 수동 승인과 장애 없는 관찰 기간을 통과한 뒤에만 허용한다.
 
 ## 10. 취약점과 해결 방안
 
@@ -1100,9 +1198,12 @@ expected_slippage <= max_expected_slippage_pct
 | FVG/OB 재사용 | 이미 소진된 구간을 반복 진입 근거로 사용 | Zone 상태 머신으로 `filled/invalidated/expired` 상태는 점수 제외 |
 | 점수화 과최적화 | 데이터 스누핑과 우연한 성과 | 파라미터 탐색 한도, 워크포워드, 홀드아웃, 대조군, 다중검정 보정 적용 |
 | 호가 불균형 백테스트 불가 | 공식 과거 REST만으로 재현 불가 | 실시간 호가 로그를 별도 저장한 구간에서만 검증하고, 없으면 실거래 필터로만 사용 |
+| 시점별 외부/시장경보 로그 부재 | 현재 정보를 과거에 소급 적용하는 룩어헤드 | `market_event`, 뉴스, 김치프리미엄은 point-in-time 로그가 있는 기간만 hard block 백테스트에 사용 |
 | 캔들 누락/중복 | 신호 시점 왜곡 | `candle_date_time` upsert, synthetic candle 플래그, 확정 grace 적용 |
 | 주문 중복/상태 불명 | 중복 매수, 과다 노출 | `client_order_key`, 주문 상태 머신, `UNKNOWN` 상태 신규 진입 금지 |
-| 봇 장애 중 손절 미실행 | 현물 포지션 방치 | 포지션 크기 보수화, emergency exit, 장애 알림, recovery-only 모드 |
+| 서버 측 stop-loss 부재 | 봇 장애 중 현물 포지션 방치 | 손절은 봇 관리 stop으로 명시, 포지션 크기 보수화, emergency exit, 장애 알림, recovery-only 모드 |
+| `PAPER`를 공식 샌드박스로 오해 | 실제 체결 리스크 미검증 | 내부 모의매매와 `/orders/test` preflight를 분리하고, 최소 주문금액 소액 실거래 단계로 체결 오차 검증 |
+| `LIVE` 게이트 부재 | 실수로 실거래 전환 | 기본 non-live, 수동 승인, 주문 테스트, cap, reconciliation clean, kill switch 확인 후에만 활성화 |
 | 레이트 리밋/인증 실패 | 주문/청산 지연 | `Remaining-Req` 기반 토큰 버킷, 429/418 대응, 최소 권한 API 키 |
 | 유의종목/뉴스/김프 리스크 | 급락과 유동성 공백 | 업비트 유의종목/주의 경보는 hard block, 외부 뉴스/김프는 옵션 필터로 분리 |
 | 재시작 후 상태 불일치 | 잘못된 포지션 판단 | REST bootstrap, private WebSocket 연결, reconciliation 완료 전 신규 주문 금지 |
@@ -1133,4 +1234,10 @@ expected_slippage <= max_expected_slippage_pct
 9. Fake out/Trap 검출기
 10. OB 후보 검출기
 
-최종 전략 `UFS-R1`은 현물 롱 전용 전략으로 시작하고, 하락 신호는 청산/회피 필터로 사용한다. 수익 보장을 전제로 하지 않으며, 실제 투입 전 백테스트와 페이퍼 트레이딩을 통과해야 한다. 검증 결과가 양호하더라도 시장 구조 변화, 거래소 장애, 상장폐지, 뉴스 이벤트, 유동성 증발로 손실이 발생할 수 있으므로 안전장치가 신호 로직보다 우선한다.
+최종 전략 `UFS-R1`은 현물 롱 전용 전략으로 시작하고, 하락 신호는 청산/회피 필터로 사용한다. 수익 보장을 전제로 하지 않으며, 실제 투입 전 백테스트, 페이퍼 트레이딩, `DRY_RUN`, `PREFLIGHT`, 소액 실거래 검증을 순차 통과해야 한다. 검증 결과가 양호하더라도 시장 구조 변화, 거래소 장애, 상장폐지, 뉴스 이벤트, 유동성 증발로 손실이 발생할 수 있으므로 안전장치가 신호 로직보다 우선한다.
+
+현재 문서의 판정은 다음과 같다.
+
+- 전략 아이디어/프로토타입 검증 명세: 구현 가능.
+- 내부 `PAPER`/`DRY_RUN` 명세: 구현 가능.
+- production `LIVE` 운영 명세: 손절 SLA, live gate, point-in-time 데이터, 위험 자산 action matrix, `UNKNOWN` 주문 처리 보강 없이는 불가. 본 문서는 위 보강을 반영했지만, 구현 직전에는 공식 문서와 실제 API 응답으로 다시 확인해야 한다.
