@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UFS-R1 자동매매 명세 합의 보고서</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5c677d;
+      --line: #d9dfec;
+      --blue: #2558d6;
+      --green: #147a52;
+      --amber: #9a5b00;
+      --red: #b42318;
+      --soft-blue: #eaf0ff;
+      --soft-green: #eaf8f1;
+      --soft-amber: #fff4df;
+      --soft-red: #fff0ee;
+      --soft-gray: #f1f3f8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Noto Sans KR", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+
+    header {
+      padding: 32px 0 28px;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 880px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    main {
+      display: grid;
+      gap: 24px;
+      margin-top: 28px;
+    }
+
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 26px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    .lead {
+      font-size: 18px;
+      color: #25314a;
+    }
+
+    .note {
+      padding: 16px 18px;
+      border-left: 4px solid var(--blue);
+      background: var(--soft-blue);
+      border-radius: 6px;
+    }
+
+    .warning {
+      padding: 16px 18px;
+      border-left: 4px solid var(--red);
+      background: var(--soft-red);
+      border-radius: 6px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: var(--soft-gray);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 15px;
+      color: var(--muted);
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 0;
+      overflow-wrap: anywhere;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #edf1f8;
+      font-weight: 800;
+    }
+
+    .tag {
+      display: inline-block;
+      min-width: 52px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .p0 { color: var(--red); background: var(--soft-red); }
+    .p1 { color: var(--amber); background: var(--soft-amber); }
+    .p2 { color: var(--green); background: var(--soft-green); }
+    .agree { color: var(--green); font-weight: 800; }
+    .partial { color: var(--amber); font-weight: 800; }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #edf1f8;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+      align-items: stretch;
+    }
+
+    .step {
+      position: relative;
+      min-height: 112px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+    }
+
+    .step::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      width: 13px;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .step:last-child::after {
+      display: none;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--blue);
+    }
+
+    .ladder {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .ladder-row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .ladder-row .rank {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+    }
+
+    .ladder-row .desc {
+      padding: 14px;
+    }
+
+    .sources li {
+      margin-bottom: 8px;
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    @media (max-width: 900px) {
+      .grid.three,
+      .grid.two,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .step::after {
+        top: auto;
+        right: auto;
+        bottom: -13px;
+        left: 28px;
+        width: 2px;
+        height: 13px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">gpt-5.5 별도 에이전트 토론 합의 보고서</p>
+      <h1>UFS-R1 자동매매 명세를 “수익 기대값 중심” 개발 문서로 바꾸기</h1>
+      <p class="subtitle">
+        대상 문서: <code>upbit_auto_trading_strategy_spec.md</code>. 이 보고서는 메인 에이전트 리뷰와 별도 gpt-5.5 에이전트의 반대 검토를 합쳐,
+        실제 개발자가 구현할 수 있고 비개발자도 위험을 이해할 수 있는 수정 방향을 정리한 결론 문서입니다.
+      </p>
+    </header>
+
+    <main>
+      <section>
+        <h2>1. 결론 요약</h2>
+        <p class="lead">
+          현재 명세서는 전략 아이디어보다 안전장치가 잘 잡혀 있어 출발점은 좋습니다. 하지만 실거래에 가까워질수록
+          “차트 신호를 더 잘 찾는 일”보다 “주문 중복, 손절 실패, 잘못된 백테스트, 숫자 오차를 막는 일”이 먼저입니다.
+        </p>
+        <div class="warning">
+          <strong>핵심 합의:</strong> 수익을 극대화한다는 말은 승률을 약속한다는 뜻이 아닙니다. 여기서는
+          <strong>큰 사고를 먼저 줄이고, 검증된 조건에서만 거래해 위험 대비 기대값을 높인다</strong>는 뜻으로 사용합니다.
+        </div>
+        <div class="grid three">
+          <div class="metric">
+            <strong>가장 먼저 고칠 것</strong>
+            <span>주문 안전성</span>
+          </div>
+          <div class="metric">
+            <strong>두 번째 축</strong>
+            <span>검증 단계 분리</span>
+          </div>
+          <div class="metric">
+            <strong>전략 점수의 역할</strong>
+            <span>결정이 아닌 설명</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. 토론 절차</h2>
+        <p>
+          메인 에이전트는 원문에서 위험한 지점을 찾았고, 별도 gpt-5.5 에이전트는 각 항목에 대해 “동의/부분동의/반대”로 검토했습니다.
+          둘의 의견을 합쳐 아래 합의안을 만들었습니다.
+        </p>
+        <div class="flow" aria-label="토론 절차">
+          <div class="step">
+            <b>1단계</b>
+            원본 명세서에서 구현 위험을 추출
+          </div>
+          <div class="step">
+            <b>2단계</b>
+            메인 에이전트가 주요 발견 6개 정리
+          </div>
+          <div class="step">
+            <b>3단계</b>
+            gpt-5.5 에이전트가 반대 검토
+          </div>
+          <div class="step">
+            <b>4단계</b>
+            수익 기대값과 개발 가능성 기준으로 합의
+          </div>
+          <div class="step">
+            <b>5단계</b>
+            P0/P1/P2 우선순위로 문서 수정 방향 확정
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>3. 주요 발견별 합의</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>발견</th>
+              <th>합의 판단</th>
+              <th>쉬운 설명</th>
+              <th>문서 수정 방향</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>주문 timeout과 <code>identifier</code></td>
+              <td><span class="partial">부분동의</span></td>
+              <td>
+                주문 버튼을 눌렀는데 화면이 멈췄다고 다시 누르면 두 번 주문될 수 있습니다.
+                자동매매도 같습니다. 응답이 없으면 새 주문을 만들지 말고, 이미 보낸 주문이 살아 있는지 먼저 확인해야 합니다.
+              </td>
+              <td>
+                주문 전 <code>identifier</code>를 저장하고 <code>UNKNOWN</code> 상태로 둡니다.
+                timeout 후에는 원래 <code>identifier</code>, 미체결/종료 주문, 잔고와 <code>locked</code> 변화를 조회합니다.
+                확정 전까지 같은 마켓 신규 주문은 금지합니다.
+              </td>
+            </tr>
+            <tr>
+              <td><code>UPBIT_ONLY</code>와 외부 필터 충돌</td>
+              <td><span class="partial">부분동의</span></td>
+              <td>
+                외부 뉴스나 김치프리미엄 정보는 도움이 될 수 있지만, 그 데이터가 잠깐 끊겼다고 무조건 거래를 멈추면 기회를 놓칠 수 있습니다.
+              </td>
+              <td>
+                운영 모드를 <code>UPBIT_ONLY</code>, <code>EXTERNAL_OPTIONAL</code>, <code>EXTERNAL_REQUIRED</code>로 나눕니다.
+                외부 데이터가 <code>unknown</code>일 때 각 모드가 경고, 비중 축소, 진입 차단 중 무엇을 하는지 표로 명시합니다.
+              </td>
+            </tr>
+            <tr>
+              <td>캔들 백테스트와 호가 검증 범위 불일치</td>
+              <td><span class="partial">부분동의</span></td>
+              <td>
+                종가만 적힌 가계부로 손님이 줄 서 있던 상황까지 알 수는 없습니다.
+                캔들 데이터만으로는 호가 잔량, 부분 체결, 실제 미끄러짐을 완전히 검증할 수 없습니다.
+              </td>
+              <td>
+                검증을 1단계 캔들 기대값, 2단계 실시간 호가 로그, 3단계 페이퍼 트레이딩으로 나눕니다.
+                호가 검증 전에는 <code>orderbook_imbalance</code>를 점수 가산이 아니라 참고 필터로만 둡니다.
+              </td>
+            </tr>
+            <tr>
+              <td>현물 손절의 client-side 위험</td>
+              <td><span class="agree">동의</span></td>
+              <td>
+                손절 감시는 봇이 켜져 있을 때만 작동하는 알람 시계와 비슷합니다.
+                알람 시계가 꺼지면 손절도 늦어질 수 있습니다.
+              </td>
+              <td>
+                최악의 경우 손절은 client-side라고 가정합니다.
+                <code>watchdog_heartbeat_sec</code>, <code>max_unprotected_position_sec</code>,
+                장애 알림, 긴급 청산, 수동 대응 절차를 P0 요구사항으로 추가합니다.
+              </td>
+            </tr>
+            <tr>
+              <td><code>float</code> 기반 가격/수량/수수료</td>
+              <td><span class="agree">동의</span></td>
+              <td>
+                돈 계산을 대충 반올림하면 잔돈이 틀어집니다.
+                자동 주문에서는 작은 오차도 최소 주문금액, 호가 단위, 잔고 부족 오류로 이어질 수 있습니다.
+              </td>
+              <td>
+                주문, 잔고, 체결, 수수료, 손익은 <code>Decimal</code> 또는 정수 최소 단위로 처리합니다.
+                API 전송 직전에는 문자열 숫자로 직렬화하고, 지표 계산용 <code>float</code>와 주문용 숫자 타입을 분리합니다.
+              </td>
+            </tr>
+            <tr>
+              <td><code>signal_score_threshold=70</code></td>
+              <td><span class="agree">동의</span></td>
+              <td>
+                점수가 높다고 돈을 버는 것은 아닙니다.
+                중요한 것은 수수료와 미끄러짐까지 뺀 뒤에도 평균적으로 남는지가 검증되는 것입니다.
+              </td>
+              <td>
+                신호 점수는 실거래 결정 기준이 아니라 후보 정렬과 설명용으로 낮춥니다.
+                threshold 70은 “초기 가설/페이퍼 전용”으로 표시하고, 워크포워드 검증 후에만 확정합니다.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>4. 추가로 합의한 누락 위험</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>누락 위험</th>
+              <th>왜 중요한가</th>
+              <th>수정 방향</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>생존편향</td>
+              <td>지금 살아남은 종목만 과거 테스트에 넣으면 성과가 실제보다 좋아 보일 수 있습니다.</td>
+              <td>백테스트 시점별 거래 가능 종목, 당시 거래대금, 상장/상폐/유의종목 이력을 반영합니다.</td>
+            </tr>
+            <tr>
+              <td>실거래 전 최소 주문 테스트 부족</td>
+              <td>전략은 맞아도 주문 형식, 최소 주문금액, 호가 단위, 권한 오류 때문에 실제 주문이 실패할 수 있습니다.</td>
+              <td>주문 생성 테스트 API 또는 최소 권한 dry-run 체크리스트를 P0에 추가합니다.</td>
+            </tr>
+            <tr>
+              <td>보안과 운영 책임 경계</td>
+              <td>API 키 유출이나 비밀값 로그 노출은 전략 손실보다 더 치명적입니다.</td>
+              <td>출금 권한 금지, 비밀값 로그 금지, NTP 시간 동기화, 알림 채널, 수동 중단 절차를 명시합니다.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>5. 우선순위 합의안</h2>
+        <p>
+          개발 순서는 “돈을 벌 것 같은 신호”보다 “돈을 크게 잃지 않게 하는 안전장치”가 먼저입니다.
+          자동차로 비유하면, 엔진 튜닝 전에 브레이크와 안전벨트를 먼저 확인하는 순서입니다.
+        </p>
+        <div class="ladder">
+          <div class="ladder-row">
+            <div class="rank p0">P0</div>
+            <div class="desc">
+              <strong>실거래 전 반드시 필요한 안전장치</strong><br>
+              주문 timeout/중복 방지 상태 머신, <code>UNKNOWN</code> 주문 신규 진입 차단,
+              client-side 손절 장애 대응, <code>Decimal</code>/정수 단위 주문 모델,
+              API/잔고/미체결 재대조, 킬스위치.
+            </div>
+          </div>
+          <div class="ladder-row">
+            <div class="rank p1">P1</div>
+            <div class="desc">
+              <strong>검증을 실제 시장에 가깝게 만드는 장치</strong><br>
+              외부 필터 모드 분리, 백테스트와 호가 검증 단계 분리, 페이퍼 트레이딩 합격 기준,
+              생존편향 제거, 체결/수수료/슬리피지 모델.
+            </div>
+          </div>
+          <div class="ladder-row">
+            <div class="rank p2">P2</div>
+            <div class="desc">
+              <strong>전략 성능을 다듬는 장치</strong><br>
+              신호 점수 가중치 검증, FVG/OB/Trap 개별 이벤트 스터디,
+              threshold 최적화 제한, 외부 뉴스/김치프리미엄 필터 고도화.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>6. 개발 가능한 문서 형태 제안</h2>
+        <p>
+          원본 명세서는 설명이 풍부하지만, 구현자가 바로 작업하기에는 정책이 섞여 있는 부분이 있습니다.
+          아래 구조로 재정리하면 개발 작업 단위와 검증 기준이 분명해집니다.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>문서 장</th>
+              <th>넣어야 할 내용</th>
+              <th>완료 기준</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>운영 모드 정의</td>
+              <td><code>UPBIT_ONLY</code>, <code>EXTERNAL_OPTIONAL</code>, <code>EXTERNAL_REQUIRED</code>의 차단 규칙</td>
+              <td>외부 데이터 장애 시 행동이 표 하나로 설명됨</td>
+            </tr>
+            <tr>
+              <td>주문 상태 머신</td>
+              <td>주문 전 저장, <code>SUBMITTING</code>, <code>UNKNOWN</code>, 조회/대조, 신규 진입 차단</td>
+              <td>timeout이 나도 중복 주문 경로가 없음</td>
+            </tr>
+            <tr>
+              <td>숫자 타입 정책</td>
+              <td><code>Money</code>, <code>Price</code>, <code>Quantity</code>, <code>Fee</code>, API 문자열 직렬화</td>
+              <td>주문 직전 호가 단위/최소금액/수수료 검증 가능</td>
+            </tr>
+            <tr>
+              <td>손절 장애 대응</td>
+              <td>client-side 손절 가정, watchdog, 긴급 청산, 수동 대응 절차</td>
+              <td>봇 장애 중 열린 포지션의 최대 방치 시간을 제한</td>
+            </tr>
+            <tr>
+              <td>검증 단계</td>
+              <td>캔들 검증, 호가 로그 검증, 페이퍼 검증, 소액 실거래</td>
+              <td>각 단계가 통과해야 다음 단계로 이동</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>7. 다음 문서 수정 체크리스트</h2>
+        <div class="grid two">
+          <div class="note">
+            <h3>P0 수정 체크리스트</h3>
+            <ul>
+              <li><code>identifier</code>는 주문 전 저장하고, timeout 시 재주문 금지로 수정</li>
+              <li><code>UNKNOWN</code> 주문이 있으면 같은 마켓 신규 진입 금지</li>
+              <li>손절 감시가 봇 장애 시 실패할 수 있음을 명시</li>
+              <li>가격/수량/수수료 타입을 <code>Decimal</code> 또는 정수 단위로 변경</li>
+              <li>주문 생성 테스트와 최소 권한 API 체크리스트 추가</li>
+            </ul>
+          </div>
+          <div class="note">
+            <h3>P1/P2 수정 체크리스트</h3>
+            <ul>
+              <li>외부 데이터 모드별 hard block 기준 표 추가</li>
+              <li>캔들 백테스트와 호가 로그 검증을 별도 단계로 분리</li>
+              <li>생존편향 제거를 위해 시점별 유니버스 재구성 명시</li>
+              <li><code>signal_score_threshold=70</code>은 검증 전 가설로 표시</li>
+              <li>FVG/OB/Trap 개별 이벤트 스터디 결과를 점수 근거로 연결</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>8. 근거 자료</h2>
+        <ul class="sources">
+          <li>원본 명세서: <code>D:\workspace\Haley\upbit_auto_trading_strategy_spec.md</code></li>
+          <li>메인 에이전트 검토: 주문 중복, 외부 필터 충돌, 백테스트 범위, client-side 손절, 숫자 타입, 점수 과최적화 위험</li>
+          <li>gpt-5.5 별도 에이전트 합의: 같은 <code>identifier</code>로 재주문도 위험하므로 “재주문 금지 후 원래 identifier로 조회/대조”가 정확한 합의안</li>
+          <li><a href="https://docs.upbit.com/kr/reference/new-order">업비트 주문 생성 공식 문서</a></li>
+          <li><a href="https://docs.upbit.com/kr/reference/rate-limits">업비트 요청 수 제한 공식 문서</a></li>
+          <li><a href="https://docs.upbit.com/kr/kr/docs/krw-market-info">업비트 KRW 마켓 주문 가격 단위/최소 주문 가능 금액</a></li>
+          <li><a href="https://global-docs.upbit.com/changelog/websocket_candle">업비트 WebSocket Candle 안내</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
