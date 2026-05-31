@@ -13,22 +13,20 @@
 
 ## 현재 상태
 
-일부 완료:
+완료:
 
 - `src/haley/domain.py`에 운영 모드, 주문 의도, 주문 상태, 체결, 포지션, 실행 이벤트, 리스크/데이터 품질 모델이 추가됨.
 - `src/haley/state_store.py`에 SQLite 기반 주문 저장과 실행 이벤트 저장이 추가됨.
-- `tests/test_domain_contracts.py`, `tests/test_state_store.py`가 추가됨.
-- 마지막 확인 기준으로 `python -m pytest`는 12개 테스트 통과.
+- `src/haley/api_contracts.py`에 API 공통 성공/오류 응답과 상태 변경 요청 계약이 추가됨.
+- `src/haley/security.py`에 민감값 마스킹 규칙이 추가됨.
+- `tests/test_domain_contracts.py`, `tests/test_state_store.py`, `tests/test_api_contracts.py`, `tests/test_sensitive_data.py`가 추가됨.
+- `ExecutionEvent`는 SQLite trigger로 update/delete가 차단됨.
+- `OrderState.version` 충돌 방지 테스트가 추가됨.
 
 ## 남은 작업
 
-- API 공통 성공 응답 형식 정의.
-- API 공통 오류 응답 형식 정의.
-- 상태 변경 API 공통 입력 모델 정의: `request_id`, `idempotency_key`, `operator_id`, `reason`.
-- 민감값 마스킹 규칙 정의.
-- DB 스키마 초안 확장 여부 결정.
-- `ExecutionEvent` append-only 원칙을 테스트로 강화.
-- 문서의 M0 완료 기준과 코드 타입이 일치하는지 점검.
+- P00 기준 남은 작업 없음.
+- 저장소 확장은 P01에서 계속한다.
 
 ## 완료 조건
 
@@ -45,6 +43,7 @@
 - 안정화된 `state_store.py`
 - API 공통 계약 모듈
 - M0 계약 테스트
+- 민감값 마스킹 모듈
 
 ## 검증 명령
 
@@ -55,4 +54,4 @@ python -m compileall src tests
 
 ## 다음 세션 시작 지시문
 
-`docs/handoff/phase-00-m0-contracts.md`를 읽고, M0의 API 공통 응답/오류 형식과 상태 변경 입력 모델을 테스트 먼저 작성한 뒤 구현해.
+P00은 완료되었다. 다음 세션에서는 `docs/handoff/phase-01-state-store-and-audit.md`를 읽고 저장소 확장과 감사 로그를 테스트 먼저 작성한 뒤 구현해.

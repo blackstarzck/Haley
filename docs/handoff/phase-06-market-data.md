@@ -15,6 +15,37 @@ Upbit REST/WebSocket 기반으로 시장 데이터를 수집하고, stale/mismat
 - P05 완료 또는 최소한 API 없이도 데이터 품질 상태를 저장/조회할 수 있는 기반 완료.
 - `PAPER`에서 실제 주문 API 호출이 차단됨.
 
+## 현재 상태
+
+진행 중:
+
+- `src/haley/market_data.py`에 `Candle`, `CandleStore`, `DataQualityMonitor`가 추가됨.
+- 동일 `market + timeframe + candle_time` 캔들 upsert 테스트 통과.
+- synthetic candle이 지표에는 사용 가능하지만 패턴 생성에는 제외되는 테스트 통과.
+- stale 감지 테스트 통과.
+- REST/WebSocket 가격 불일치 감지 테스트 통과.
+- Upbit 공개 WebSocket 구독 payload 생성 테스트 통과.
+- KRW 거래대금 상위 알트 선정 테스트 통과.
+- 기본값에서 BTC/ETH 제외 테스트 통과.
+- market warning/caution을 데이터 품질 차단으로 변환하는 테스트 통과.
+
+## 남은 작업
+
+- 실제 Upbit REST 클라이언트.
+- 실제 WebSocket 수집기.
+- market warning/caution REST 조회 연결.
+- 수집 데이터를 `StateStore`와 API로 연결.
+- 재연결과 REST 보정.
+
+## 추가 진행 상태
+
+- `src/haley/upbit.py`에 Upbit REST 클라이언트 추가.
+- 공개 `/v1/market/all`, `/v1/ticker/all` 조회 테스트 통과.
+- 인증 `/v1/accounts` 잔고 조회 JWT 헤더 생성 테스트 통과.
+- Secret/JWT/nonce/query_hash 비노출 테스트 통과.
+- Upbit candle WebSocket 메시지 파서 테스트 통과.
+- 주입 가능한 `MarketDataCollector.collect_candles` 테스트 통과.
+
 ## 작업 범위
 
 - Upbit 공개 REST 클라이언트.

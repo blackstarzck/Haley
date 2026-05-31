@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Haley Operations Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080b0a;
+        --shell: #0d0f0e;
+        --surface: #101412;
+        --surface-raised: #171c19;
+        --surface-muted: #1f2521;
+        --border: #26302a;
+        --border-soft: #1a211d;
+        --text: #f2f7f4;
+        --muted: #9ba8a1;
+        --dim: #64706a;
+        --primary: #00e676;
+        --warning: #f5a524;
+        --danger: #ff4d6d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible {
+        outline: 2px solid #49ff9a;
+        outline-offset: 2px;
+      }
+
+      .app {
+        min-height: 100vh;
+        background: var(--shell);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 64px;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .brand {
+        display: grid;
+        gap: 3px;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+
+      .brand span,
+      .timestamp {
+        color: var(--muted);
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .button {
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-muted);
+        color: var(--text);
+        padding: 0 12px;
+        cursor: pointer;
+        transition: border-color 160ms ease, background 160ms ease;
+      }
+
+      .button:hover {
+        border-color: var(--primary);
+      }
+
+      .button.danger {
+        background: var(--danger);
+        border-color: var(--danger);
+        color: #fff;
+        font-weight: 700;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        min-height: calc(100vh - 64px);
+      }
+
+      nav {
+        border-right: 1px solid var(--border-soft);
+        padding: 16px 12px;
+      }
+
+      .nav-button {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 36px;
+        margin-bottom: 6px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
+        padding: 0 10px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .nav-button.active,
+      .nav-button:hover {
+        background: #063c24;
+        border-color: #164a31;
+        color: var(--text);
+      }
+
+      main {
+        padding: 20px;
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(130px, 1fr));
+        gap: 12px;
+      }
+
+      .panel,
+      .metric {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .metric {
+        min-height: 88px;
+        padding: 14px;
+        display: grid;
+        align-content: space-between;
+        gap: 10px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .value {
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 14px;
+      }
+
+      .panel {
+        min-width: 0;
+      }
+
+      .panel header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 46px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--border-soft);
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 620px;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border-soft);
+        color: var(--muted);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      th {
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      td.data,
+      th.data {
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .status.ok {
+        background: var(--primary);
+        color: #061009;
+      }
+
+      .status.warn {
+        background: var(--warning);
+        color: #120d03;
+      }
+
+      .status.danger {
+        background: var(--danger);
+        color: #fff;
+      }
+
+      .empty {
+        padding: 18px 14px;
+        color: var(--dim);
+      }
+
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        nav {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--border-soft);
+        }
+
+        .nav-button {
+          width: auto;
+          min-width: max-content;
+        }
+
+        .summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .summary {
+          grid-template-columns: 1fr;
+        }
+
+        main {
+          padding: 12px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Haley Operations Console</h1>
+          <span>UFS-R1 · PAPER</span>
+        </div>
+        <div class="actions">
+          <button class="button" id="refresh" type="button">Refresh</button>
+          <button class="button danger" id="killSwitch" type="button">Kill Switch</button>
+        </div>
+      </header>
+      <div class="layout">
+        <nav aria-label="Operations navigation">
+          <button class="nav-button active" type="button">Overview <span id="modeNav">PAPER</span></button>
+          <button class="nav-button" type="button">Orders <span id="orderCount">0</span></button>
+          <button class="nav-button" type="button">Positions <span id="positionCount">0</span></button>
+          <button class="nav-button" type="button">Risk <span id="blockCount">0</span></button>
+          <button class="nav-button" type="button">Alerts <span id="alertCount">0</span></button>
+        </nav>
+        <main>
+          <section class="summary" aria-label="Status summary">
+            <div class="metric">
+              <div class="label">Mode</div>
+              <div class="value" id="modeValue">PAPER</div>
+            </div>
+            <div class="metric">
+              <div class="label">New Orders</div>
+              <div class="value" id="orderGate">...</div>
+            </div>
+            <div class="metric">
+              <div class="label">Kill Switch</div>
+              <div class="value" id="killValue">...</div>
+            </div>
+            <div class="metric">
+              <div class="label">Risk Blocks</div>
+              <div class="value" id="riskValue">0</div>
+            </div>
+            <div class="metric">
+              <div class="label">Open Positions</div>
+              <div class="value" id="positionsValue">0</div>
+            </div>
+            <div class="metric">
+              <div class="label">Updated</div>
+              <div class="timestamp" id="updatedAt">-</div>
+            </div>
+          </section>
+
+          <section class="grid">
+            <article class="panel">
+              <header>
+                <h2>Orders</h2>
+                <span class="status warn" id="ordersState">LOADING</span>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Market</th>
+                      <th>Status</th>
+                      <th class="data">Quote</th>
+                      <th class="data">Volume</th>
+                      <th>Key</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ordersBody"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel">
+              <header>
+                <h2>Risk Blocks</h2>
+                <span class="status ok" id="riskState">OK</span>
+              </header>
+              <div id="riskBody" class="empty">No blocks</div>
+            </article>
+          </section>
+
+          <section class="grid">
+            <article class="panel">
+              <header>
+                <h2>Positions</h2>
+                <span class="status ok" id="positionsState">OK</span>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Market</th>
+                      <th class="data">Volume</th>
+                      <th class="data">Average</th>
+                      <th class="data">PnL</th>
+                      <th>Protected</th>
+                    </tr>
+                  </thead>
+                  <tbody id="positionsBody"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel">
+              <header>
+                <h2>Alerts</h2>
+                <span class="status ok" id="alertsState">OK</span>
+              </header>
+              <div id="alertsBody" class="empty">No alerts</div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      async function getJson(path) {
+        const response = await fetch(path, { headers: { "X-Request-ID": `web-${Date.now()}` } });
+        if (!response.ok) throw new Error(`${path} ${response.status}`);
+        return response.json();
+      }
+
+      function statusClass(value) {
+        if (value === true || value === "FILLED" || value === "PAPER") return "ok";
+        if (value === false || value === "KILL_SWITCHED") return "danger";
+        return "warn";
+      }
+
+      function row(cells) {
+        return `<tr>${cells.map((cell) => `<td${cell.data ? ' class="data"' : ""}>${cell.value}</td>`).join("")}</tr>`;
+      }
+
+      async function refresh() {
+        const [status, orders, positions, blocks, alerts] = await Promise.all([
+          getJson("/api/status"),
+          getJson("/api/orders"),
+          getJson("/api/positions"),
+          getJson("/api/risk/blocks"),
+          getJson("/api/alerts"),
+        ]);
+
+        const statusData = status.data;
+        $("modeValue").textContent = statusData.mode;
+        $("modeNav").textContent = statusData.mode;
+        $("orderGate").innerHTML = `<span class="status ${statusClass(statusData.can_place_new_order)}">${statusData.can_place_new_order ? "OPEN" : "BLOCKED"}</span>`;
+        $("killValue").innerHTML = `<span class="status ${statusClass(!statusData.kill_switch.enabled)}">${statusData.kill_switch.enabled ? "ON" : "OFF"}</span>`;
+        $("riskValue").textContent = String(blocks.data.length);
+        $("positionsValue").textContent = String(positions.data.length);
+        $("updatedAt").textContent = status.server_time;
+
+        $("orderCount").textContent = String(orders.data.length);
+        $("positionCount").textContent = String(positions.data.length);
+        $("blockCount").textContent = String(blocks.data.length);
+        $("alertCount").textContent = String(alerts.data.length);
+
+        $("ordersState").textContent = orders.data.length ? "ACTIVE" : "EMPTY";
+        $("ordersState").className = `status ${orders.data.length ? "warn" : "ok"}`;
+        $("ordersBody").innerHTML = orders.data.length
+          ? orders.data.map((item) => row([
+              { value: item.market },
+              { value: item.status },
+              { value: item.quote_amount, data: true },
+              { value: item.volume, data: true },
+              { value: item.client_order_key, data: true },
+            ])).join("")
+          : row([{ value: "No orders" }, { value: "-" }, { value: "-", data: true }, { value: "-", data: true }, { value: "-" }]);
+
+        $("positionsBody").innerHTML = positions.data.length
+          ? positions.data.map((item) => row([
+              { value: item.market },
+              { value: item.volume, data: true },
+              { value: item.average_entry_price, data: true },
+              { value: item.realized_pnl, data: true },
+              { value: item.stop_protected ? "YES" : "NO" },
+            ])).join("")
+          : row([{ value: "No positions" }, { value: "-", data: true }, { value: "-", data: true }, { value: "-", data: true }, { value: "-" }]);
+
+        $("riskState").textContent = blocks.data.length ? "BLOCKED" : "OK";
+        $("riskState").className = `status ${blocks.data.length ? "danger" : "ok"}`;
+        $("riskBody").innerHTML = blocks.data.length
+          ? blocks.data.map((item) => `<div class="empty"><strong>${item.reason}</strong><br>${item.market || "GLOBAL"} · ${item.detail}</div>`).join("")
+          : "No blocks";
+
+        $("alertsState").textContent = alerts.data.length ? "OPEN" : "OK";
+        $("alertsState").className = `status ${alerts.data.length ? "warn" : "ok"}`;
+        $("alertsBody").innerHTML = alerts.data.length
+          ? alerts.data.map((item) => `<div class="empty"><strong>${item.severity}</strong><br>${item.alert_id} · ${item.message}</div>`).join("")
+          : "No alerts";
+      }
+
+      $("refresh").addEventListener("click", () => refresh().catch(console.error));
+      $("killSwitch").addEventListener("click", async () => {
+        await fetch("/api/kill-switch/enable", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_id: `web-${Date.now()}`,
+            idempotency_key: `kill-${Date.now()}`,
+            operator_id: "web-console",
+            reason: "operator requested kill switch",
+          }),
+        });
+        await refresh();
+      });
+
+      refresh().catch(() => {
+        $("ordersState").textContent = "OFFLINE";
+        $("ordersState").className = "status danger";
+      });
+    </script>
+  </body>
+</html>

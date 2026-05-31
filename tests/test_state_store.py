@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+import sqlite3
 
 import pytest
 
@@ -97,3 +98,45 @@ def test_invalid_transition_is_rejected_without_event_append() -> None:
 
     assert store.get_order(order_id).status is OrderStatus.PLANNED
     assert len(store.list_execution_events(order_id)) == 1
+
+
+def test_execution_events_are_append_only_at_database_level() -> None:
+    store = StateStore.in_memory()
+    order_id = store.create_order(make_intent())
+    event = store.list_execution_events(order_id)[0]
+
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        store._connection.execute(  # noqa: SLF001 - verifies database contract.
+            "UPDATE execution_events SET reason = ? WHERE event_id = ?",
+            ("mutated", event.event_id),
+        )
+
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        store._connection.execute(  # noqa: SLF001 - verifies database contract.
+            "DELETE FROM execution_events WHERE event_id = ?",
+            (event.event_id,),
+        )
+
+
+def test_stale_order_version_cannot_transition() -> None:
+    store = StateStore.in_memory()
+    order_id = store.create_order(make_intent())
+    store.transition_order(
+        order_id=order_id,
+        next_status=OrderStatus.SUBMITTING,
+        request_id="req-1",
+        idempotency_key="idem-1",
+        operator_id="local-user",
+        reason="paper submit",
+    )
+
+    with pytest.raises(StateStoreConstraintError, match="order version conflict"):
+        store.transition_order(
+            order_id=order_id,
+            next_status=OrderStatus.UNKNOWN,
+            request_id="req-2",
+            idempotency_key="idem-2",
+            operator_id="local-user",
+            reason="stale transition",
+            expected_version=1,
+        )

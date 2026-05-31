@@ -12,8 +12,39 @@
 
 ## 시작 조건
 
-- P04 완료.
+- P04 완료됨.
 - PAPER 가상 주문/체결/포지션이 테스트로 검증됨.
+
+## 현재 상태
+
+진행 중:
+
+- `src/haley/api/server.py`에 FastAPI app factory가 추가됨.
+- `/api/status` 테스트 통과.
+- `/api/orders` 테스트 통과.
+- `/api/positions` 테스트 통과.
+- `/api/risk/blocks` 테스트 통과.
+- `/api/data-quality` 테스트 통과.
+- `/api/alerts` 테스트 통과.
+- `/api/audit-events` 테스트 통과.
+- `/api/settings` 테스트 통과.
+- `/api/kill-switch/enable` 테스트 통과.
+- `/api/alerts/{alert_id}/ack` 테스트 통과.
+- `/api/recovery/run` 골격 테스트 통과.
+- `/api/recovery/runs/{recovery_run_id}` 테스트 통과.
+- `/api/dry-run/order` 테스트 통과.
+- `/api/paper/reset` 테스트 통과.
+- `/api/settings/paper` 테스트 통과.
+- `web/operations-console.html` 정적 운영 콘솔 초안 추가.
+- 로컬 HTTP 서버로 콘솔 렌더링 확인.
+- `/console`에서 FastAPI가 운영 콘솔 HTML을 직접 서빙하는 테스트 통과.
+
+## 남은 작업
+
+- 차트 영역과 데이터 품질 상세 화면.
+- 복구 단계별 상세 상태.
+- DRY_RUN 주문 요청 원문 상세 표시.
+- Playwright 기반 회귀 테스트 자동화.
 
 ## 작업 범위
 

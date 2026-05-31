@@ -233,6 +233,17 @@ class PositionState:
 
 
 @dataclass(frozen=True)
+class StopProtectionState:
+    market: str
+    position_volume: Decimal
+    protected: bool = False
+    created_at: datetime = field(default_factory=_utc_now)
+
+    def __post_init__(self) -> None:
+        _require_decimal("position_volume", self.position_volume)
+
+
+@dataclass(frozen=True)
 class ExecutionEvent:
     event_id: str
     order_id: str | None

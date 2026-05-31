@@ -7,6 +7,10 @@ name = "haley"
 version = "0.1.0"
 description = "UFS-R1 paper trading and operations console backend"
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.136.3",
+    "httpx>=0.28.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

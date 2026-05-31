@@ -12,8 +12,20 @@
 
 ## 시작 조건
 
-- P01 완료.
+- P01 완료됨.
 - 주문, 이벤트, 감사 로그 저장 기반이 테스트로 검증됨.
+
+## 현재 상태
+
+완료:
+
+- `src/haley/orders.py`에 `OrderCoordinator`가 추가됨.
+- `client_order_key` 생성 규칙이 추가됨.
+- 주문 요청 해시 생성이 추가됨.
+- 주문 제출 전 `OrderIntent` 저장이 추가됨.
+- 같은 마켓에 `SUBMITTING`, `UNKNOWN`, `PARTIALLY_FILLED` 주문이 있으면 신규 진입을 차단함.
+- timeout을 `UNKNOWN` 상태로 기록하는 메서드가 추가됨.
+- `client_order_key`와 업비트 `exchange_identifier` 분리 테스트가 추가됨.
 
 ## 작업 범위
 
@@ -48,4 +60,4 @@ python -m compileall src tests
 
 ## 다음 세션 시작 지시문
 
-`docs/handoff/phase-02-order-coordinator.md`를 읽고, 같은 마켓 미확정 주문 차단 테스트부터 작성한 뒤 `OrderCoordinator`를 구현해.
+P02는 완료되었다. 다음 세션에서는 `docs/handoff/phase-03-risk-manager.md`를 읽고 P03의 남은 리스크 항목을 테스트 먼저 작성한 뒤 구현해.
