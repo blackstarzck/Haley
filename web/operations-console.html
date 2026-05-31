@@ -85,6 +85,28 @@
         gap: 8px;
       }
 
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        padding: 14px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field input {
+        width: 100%;
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-muted);
+        color: var(--text);
+        padding: 0 10px;
+      }
+
       .button {
         height: 36px;
         border: 1px solid var(--border);
@@ -362,9 +384,65 @@
               <div class="value" id="positionsValue">0</div>
             </div>
             <div class="metric">
+              <div class="label">Runner</div>
+              <div class="value" id="runnerValue">...</div>
+            </div>
+            <div class="metric">
+              <div class="label">Last Tick</div>
+              <div class="timestamp" id="lastTickValue">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Last Action</div>
+              <div class="value" id="lastActionValue">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Markets</div>
+              <div class="value" id="runnerMarketsValue">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Paper Cash</div>
+              <div class="value" id="paperCashValue">0</div>
+            </div>
+            <div class="metric">
+              <div class="label">Locked Cash</div>
+              <div class="value" id="paperLockedValue">0</div>
+            </div>
+            <div class="metric">
               <div class="label">Updated</div>
               <div class="timestamp" id="updatedAt">-</div>
             </div>
+          </section>
+
+          <section class="grid">
+            <article class="panel">
+              <header>
+                <h2>PAPER Runner</h2>
+                <span class="status warn" id="runnerState">STOPPED</span>
+              </header>
+              <div class="controls">
+                <button class="button" id="runnerStart" type="button">Start</button>
+                <button class="button" id="runnerStop" type="button">Stop</button>
+                <button class="button" id="paperReset" type="button">Reset</button>
+              </div>
+            </article>
+
+            <article class="panel">
+              <header>
+                <h2>PAPER Settings</h2>
+                <span class="status ok" id="settingsState">READY</span>
+              </header>
+              <div class="controls">
+                <label class="field">
+                  <span class="label">Initial Cash KRW</span>
+                  <input id="paperInitialCash" inputmode="decimal" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span class="label">Top Alt Count</span>
+                  <input id="topAltCount" inputmode="numeric" autocomplete="off" />
+                </label>
+                <button class="button" id="settingsSave" type="button">Save</button>
+              </div>
+            </article>
           </section>
 
           <section class="grid">
@@ -451,21 +529,35 @@
       }
 
       async function refresh() {
-        const [status, orders, positions, blocks, alerts] = await Promise.all([
+        const [status, orders, positions, blocks, alerts, settings, runner] = await Promise.all([
           getJson("/api/status"),
           getJson("/api/orders"),
           getJson("/api/positions"),
           getJson("/api/risk/blocks"),
           getJson("/api/alerts"),
+          getJson("/api/settings"),
+          getJson("/api/paper-runner/status"),
         ]);
 
         const statusData = status.data;
+        const settingsData = settings.data;
+        const runnerData = runner.data;
         $("modeValue").textContent = statusData.mode;
         $("modeNav").textContent = statusData.mode;
         $("orderGate").innerHTML = `<span class="status ${statusClass(statusData.can_place_new_order)}">${statusData.can_place_new_order ? "OPEN" : "BLOCKED"}</span>`;
         $("killValue").innerHTML = `<span class="status ${statusClass(!statusData.kill_switch.enabled)}">${statusData.kill_switch.enabled ? "ON" : "OFF"}</span>`;
         $("riskValue").textContent = String(blocks.data.length);
         $("positionsValue").textContent = String(positions.data.length);
+        $("runnerValue").innerHTML = `<span class="status ${runnerData.running ? "ok" : "warn"}">${runnerData.running ? "RUNNING" : "STOPPED"}</span>`;
+        $("runnerState").textContent = runnerData.running ? "RUNNING" : "STOPPED";
+        $("runnerState").className = `status ${runnerData.running ? "ok" : "warn"}`;
+        $("lastTickValue").textContent = runnerData.last_tick_at || "-";
+        $("lastActionValue").textContent = runnerData.last_action || "-";
+        $("runnerMarketsValue").textContent = runnerData.selected_markets.length ? runnerData.selected_markets.join(", ") : "-";
+        $("paperCashValue").textContent = runnerData.paper_cash_krw;
+        $("paperLockedValue").textContent = runnerData.paper_locked_cash_krw;
+        $("paperInitialCash").value = settingsData.paper_initial_cash_krw;
+        $("topAltCount").value = String(settingsData.top_alt_count);
         $("updatedAt").textContent = status.server_time;
 
         $("orderCount").textContent = String(orders.data.length);
@@ -509,6 +601,49 @@
       }
 
       $("refresh").addEventListener("click", () => refresh().catch(console.error));
+      async function postStateChange(path, reason) {
+        const now = Date.now();
+        return fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_id: `web-${now}`,
+            idempotency_key: `${path.replaceAll("/", "-")}-${now}`,
+            operator_id: "web-console",
+            reason,
+          }),
+        });
+      }
+
+      $("runnerStart").addEventListener("click", async () => {
+        await postStateChange("/api/paper-runner/start", "operator started paper runner");
+        await refresh();
+      });
+      $("runnerStop").addEventListener("click", async () => {
+        await postStateChange("/api/paper-runner/stop", "operator stopped paper runner");
+        await refresh();
+      });
+      $("paperReset").addEventListener("click", async () => {
+        await postStateChange("/api/paper/reset", "operator reset paper portfolio");
+        await refresh();
+      });
+      $("settingsSave").addEventListener("click", async () => {
+        const now = Date.now();
+        await fetch("/api/settings/paper", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_id: `web-${now}`,
+            idempotency_key: `paper-settings-${now}`,
+            operator_id: "web-console",
+            reason: "operator updated paper settings",
+            paper_initial_cash_krw: $("paperInitialCash").value,
+            top_alt_count: Number($("topAltCount").value),
+            include_major_markets: false,
+          }),
+        });
+        await refresh();
+      });
       $("killSwitch").addEventListener("click", async () => {
         await fetch("/api/kill-switch/enable", {
           method: "POST",

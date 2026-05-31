@@ -20,6 +20,14 @@ from haley.paper import PaperPortfolio
 from haley.state_store import StateStore
 
 
+class FakeTickerClient:
+    def list_all_tickers(self, quote_currencies: list[str]) -> list[dict[str, object]]:
+        assert quote_currencies == ["KRW"]
+        return [
+            {"market": "KRW-XRP", "acc_trade_price_24h": "1000", "trade_price": "500"},
+        ]
+
+
 def test_status_api_returns_common_response_shape() -> None:
     store = StateStore.in_memory()
     app = create_app(store=store)
@@ -213,6 +221,13 @@ def test_audit_events_api_returns_masked_payload() -> None:
 
 def test_patch_paper_settings_updates_safe_paper_values_only() -> None:
     store = StateStore.in_memory()
+    store.save_paper_portfolio(
+        PaperPortfolio(
+            initial_cash_krw=Decimal("1000000"),
+            cash_krw=Decimal("900000"),
+            locked_cash_krw=Decimal("50000"),
+        )
+    )
     client = TestClient(create_app(store=store))
 
     body = client.patch(
@@ -229,9 +244,16 @@ def test_patch_paper_settings_updates_safe_paper_values_only() -> None:
     ).json()
 
     assert body["data"]["paper_initial_cash_krw"] == "2000000"
+    assert body["data"]["paper_cash_krw"] == "900000"
+    assert body["data"]["paper_locked_cash_krw"] == "50000"
     assert body["data"]["top_alt_count"] == 12
     assert body["data"]["include_major_markets"] is True
     assert "live_trading_enabled" not in body["data"]
+
+    saved = store.get_paper_portfolio()
+    assert saved.initial_cash_krw == Decimal("2000000")
+    assert saved.cash_krw == Decimal("900000")
+    assert saved.locked_cash_krw == Decimal("50000")
 
 
 def test_dry_run_order_validates_request_without_creating_order() -> None:
@@ -253,6 +275,73 @@ def test_dry_run_order_validates_request_without_creating_order() -> None:
     assert body["data"]["valid"] is True
     assert body["data"]["would_call_real_order_api"] is False
     assert store.list_orders() == []
+
+
+def test_paper_runner_apis_start_stop_and_report_status() -> None:
+    store = StateStore.in_memory()
+    store.save_paper_portfolio(PaperPortfolio(initial_cash_krw=Decimal("1000000")))
+    client = TestClient(create_app(store=store))
+
+    initial = client.get("/api/paper-runner/status").json()
+    bad_start = client.post("/api/paper-runner/start", json={})
+    started = client.post(
+        "/api/paper-runner/start",
+        json={
+            "request_id": "req-runner-start",
+            "idempotency_key": "idem-runner-start",
+            "operator_id": "local-user",
+            "reason": "start paper runner",
+        },
+    ).json()
+    stopped = client.post(
+        "/api/paper-runner/stop",
+        json={
+            "request_id": "req-runner-stop",
+            "idempotency_key": "idem-runner-stop",
+            "operator_id": "local-user",
+            "reason": "stop paper runner",
+        },
+    ).json()
+
+    assert initial["data"]["running"] is False
+    assert bad_start.status_code == 422
+    assert started["request_id"] == "req-runner-start"
+    assert started["data"]["running"] is True
+    assert started["data"]["mode"] == "PAPER"
+    assert started["data"]["paper_cash_krw"] == "1000000"
+    assert stopped["request_id"] == "req-runner-stop"
+    assert stopped["data"]["running"] is False
+
+
+def test_paper_runner_api_uses_injected_public_ticker_client() -> None:
+    store = StateStore.in_memory()
+    store.save_paper_portfolio(PaperPortfolio(initial_cash_krw=Decimal("1000000")))
+    client = TestClient(create_app(store=store, ticker_client=FakeTickerClient()))
+
+    client.post(
+        "/api/paper-runner/start",
+        json={
+            "request_id": "req-runner-start",
+            "idempotency_key": "idem-runner-start",
+            "operator_id": "local-user",
+            "reason": "start paper runner",
+        },
+    )
+    body = client.get("/api/paper-runner/status").json()
+
+    client.post(
+        "/api/paper-runner/stop",
+        json={
+            "request_id": "req-runner-stop",
+            "idempotency_key": "idem-runner-stop",
+            "operator_id": "local-user",
+            "reason": "stop paper runner",
+        },
+    )
+
+    assert body["data"]["selected_markets"] == ["KRW-XRP"]
+    assert body["data"]["last_tick_at"] is not None
+    assert body["data"]["last_action"] in {"PAPER_FILLED", "BLOCKED"}
 
 
 def test_get_recovery_run_returns_run_status() -> None:
@@ -284,6 +373,9 @@ def test_console_is_served_from_fastapi_app() -> None:
     assert response.status_code == 200
     assert "Haley Operations Console" in response.text
     assert "/api/status" in response.text
+    assert "/api/paper-runner/status" in response.text
+    assert "paperInitialCash" in response.text
+    assert "lastTickValue" in response.text
 
 
 def test_root_redirects_to_console() -> None:

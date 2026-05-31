@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from haley.api_contracts import ApiResponse, StateChangeRequest
 from haley.domain import ModeState, OrderSide, OrderType, RuntimeMode
 from haley.paper import PaperPortfolio
+from haley.paper_runner import PaperRunner, PaperRunnerState
 from haley.state_store import StateStore
 
 
@@ -55,9 +56,21 @@ class DryRunOrderBody(BaseModel):
     limit_price: str | None = None
 
 
-def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> FastAPI:
+def create_app(
+    store: StateStore,
+    runtime: ApiRuntimeState | None = None,
+    ticker_client: Any | None = None,
+) -> FastAPI:
     app = FastAPI(title="Haley Operations API")
     state = runtime or ApiRuntimeState()
+    paper_runner = PaperRunner(
+        store=store,
+        initial_cash_krw=state.paper_initial_cash_krw,
+        top_alt_count=state.top_alt_count,
+        include_major_markets=state.include_major_markets,
+        mode=state.mode,
+        ticker_client=ticker_client,
+    )
 
     @app.get("/")
     def root() -> RedirectResponse:
@@ -212,13 +225,16 @@ def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> Fas
 
     @app.get("/api/settings")
     def get_settings(x_request_id: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+        portfolio = _get_or_create_paper_portfolio(store, state.paper_initial_cash_krw)
         return ApiResponse.success(
             request_id=x_request_id or "req_settings",
             data={
                 "mode": state.mode.mode.value,
                 "paper_allow_real_order_api": state.mode.paper_allow_real_order_api,
                 "live_trading_enabled": state.mode.live_trading_enabled,
-                "paper_initial_cash_krw": str(state.paper_initial_cash_krw),
+                "paper_initial_cash_krw": _decimal_text(portfolio.initial_cash_krw),
+                "paper_cash_krw": _decimal_text(portfolio.cash_krw),
+                "paper_locked_cash_krw": _decimal_text(portfolio.locked_cash_krw),
                 "top_alt_count": state.top_alt_count,
                 "include_major_markets": state.include_major_markets,
             },
@@ -230,10 +246,15 @@ def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> Fas
         state.paper_initial_cash_krw = Decimal(body.paper_initial_cash_krw)
         state.top_alt_count = body.top_alt_count
         state.include_major_markets = body.include_major_markets
+        portfolio = _get_or_create_paper_portfolio(store, state.paper_initial_cash_krw)
+        portfolio.initial_cash_krw = state.paper_initial_cash_krw
+        store.save_paper_portfolio(portfolio)
         return ApiResponse.success(
             request_id=body.request_id,
             data={
-                "paper_initial_cash_krw": str(state.paper_initial_cash_krw),
+                "paper_initial_cash_krw": _decimal_text(portfolio.initial_cash_krw),
+                "paper_cash_krw": _decimal_text(portfolio.cash_krw),
+                "paper_locked_cash_krw": _decimal_text(portfolio.locked_cash_krw),
                 "top_alt_count": state.top_alt_count,
                 "include_major_markets": state.include_major_markets,
             },
@@ -256,7 +277,7 @@ def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> Fas
     @app.post("/api/paper/reset")
     def reset_paper(body: StateChangeBody) -> dict[str, Any]:
         body.to_state_change()
-        portfolio = store.get_paper_portfolio()
+        portfolio = _get_or_create_paper_portfolio(store, state.paper_initial_cash_krw)
         portfolio.reset()
         store.save_paper_portfolio(portfolio)
         return ApiResponse.success(
@@ -311,8 +332,60 @@ def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> Fas
             },
         )
 
+    @app.get("/api/paper-runner/status")
+    def get_paper_runner_status(
+        x_request_id: Annotated[str | None, Header()] = None,
+    ) -> dict[str, Any]:
+        return ApiResponse.success(
+            request_id=x_request_id or "req_paper_runner_status",
+            data=_paper_runner_state_data(paper_runner.status()),
+        )
+
+    @app.post("/api/paper-runner/start")
+    def start_paper_runner(body: StateChangeBody) -> dict[str, Any]:
+        body.to_state_change()
+        return ApiResponse.success(
+            request_id=body.request_id,
+            data=_paper_runner_state_data(paper_runner.start()),
+        )
+
+    @app.post("/api/paper-runner/stop")
+    def stop_paper_runner(body: StateChangeBody) -> dict[str, Any]:
+        body.to_state_change()
+        return ApiResponse.success(
+            request_id=body.request_id,
+            data=_paper_runner_state_data(paper_runner.stop()),
+        )
+
     return app
 
 
 def _decimal_text(value: Decimal | None) -> str:
     return "0" if value is None else str(value)
+
+
+def _get_or_create_paper_portfolio(
+    store: StateStore,
+    initial_cash_krw: Decimal,
+) -> PaperPortfolio:
+    try:
+        return store.get_paper_portfolio()
+    except KeyError:
+        portfolio = PaperPortfolio(initial_cash_krw=initial_cash_krw)
+        store.save_paper_portfolio(portfolio)
+        return portfolio
+
+
+def _paper_runner_state_data(state: PaperRunnerState) -> dict[str, Any]:
+    return {
+        "running": state.running,
+        "mode": state.mode,
+        "started_at": None if state.started_at is None else state.started_at.isoformat(),
+        "stopped_at": None if state.stopped_at is None else state.stopped_at.isoformat(),
+        "last_tick_at": None if state.last_tick_at is None else state.last_tick_at.isoformat(),
+        "selected_markets": state.selected_markets,
+        "last_action": state.last_action,
+        "last_block_reason": state.last_block_reason,
+        "paper_cash_krw": state.paper_cash_krw,
+        "paper_locked_cash_krw": state.paper_locked_cash_krw,
+    }
