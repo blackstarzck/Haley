@@ -1,8 +1,10 @@
 .env.local
 .env.*.local
+.venv/
 data/
 __pycache__/
 .pytest_cache/
+src/*.egg-info/
 node_modules/
 .next/
 dist/

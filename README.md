@@ -46,6 +46,28 @@ UFS-R1 전략 판단
 6. [백테스트와 페이퍼 검증 계획](docs/backtest_and_paper_trading.md): 검증 단계와 합격 기준
 7. [리스크 통제와 최종 판정](docs/risk_controls_and_final_decision.md): 취약점과 안전 우선순위
 
+## 실행
+
+Windows에서 아래 한 줄만 실행하면 로컬 운영 콘솔이 열린다.
+
+```bat
+.\run.bat
+```
+
+브라우저에서 아래 주소를 연다.
+
+```text
+http://127.0.0.1:8000/console
+```
+
+종료는 실행 중인 터미널에서 `Ctrl + C`를 누른다.
+
+PowerShell 실행 정책을 직접 우회해서 실행하려면 아래 명령을 사용할 수도 있다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
 ## 설정 파일
 
 - [.env.example](.env.example): 공개 가능한 예시 설정

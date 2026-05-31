@@ -284,3 +284,22 @@ def test_console_is_served_from_fastapi_app() -> None:
     assert response.status_code == 200
     assert "Haley Operations Console" in response.text
     assert "/api/status" in response.text
+
+
+def test_root_redirects_to_console() -> None:
+    store = StateStore.in_memory()
+    client = TestClient(create_app(store=store), follow_redirects=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/console"
+
+
+def test_favicon_request_returns_empty_response() -> None:
+    store = StateStore.in_memory()
+    client = TestClient(create_app(store=store))
+
+    response = client.get("/favicon.ico")
+
+    assert response.status_code == 204

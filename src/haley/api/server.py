@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Header
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from haley.api_contracts import ApiResponse, StateChangeRequest
@@ -58,6 +58,14 @@ class DryRunOrderBody(BaseModel):
 def create_app(store: StateStore, runtime: ApiRuntimeState | None = None) -> FastAPI:
     app = FastAPI(title="Haley Operations API")
     state = runtime or ApiRuntimeState()
+
+    @app.get("/")
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/console")
+
+    @app.get("/favicon.ico", status_code=204)
+    def favicon() -> Response:
+        return Response(status_code=204)
 
     @app.get("/console")
     def console() -> FileResponse:
