@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from threading import RLock
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -37,6 +38,7 @@ class StateStore:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
         self._connection.row_factory = sqlite3.Row
+        self._lock = RLock()
         self._initialize_schema()
 
     @classmethod
@@ -448,31 +450,36 @@ class StateStore:
         return _row_to_reconciliation_state(row)
 
     def save_paper_portfolio(self, portfolio: object) -> None:
-        with self._connection:
-            self._connection.execute("DELETE FROM paper_portfolio")
-            self._connection.execute(
-                """
-                INSERT INTO paper_portfolio (
-                    singleton_id,
-                    initial_cash_krw,
-                    cash_krw,
-                    locked_cash_krw
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO paper_portfolio (
+                        singleton_id,
+                        initial_cash_krw,
+                        cash_krw,
+                        locked_cash_krw
+                    )
+                    VALUES (1, ?, ?, ?)
+                    ON CONFLICT(singleton_id) DO UPDATE SET
+                        initial_cash_krw = excluded.initial_cash_krw,
+                        cash_krw = excluded.cash_krw,
+                        locked_cash_krw = excluded.locked_cash_krw
+                    """,
+                    (
+                        _decimal_to_text(portfolio.initial_cash_krw),
+                        _decimal_to_text(portfolio.cash_krw),
+                        _decimal_to_text(portfolio.locked_cash_krw),
+                    ),
                 )
-                VALUES (1, ?, ?, ?)
-                """,
-                (
-                    _decimal_to_text(portfolio.initial_cash_krw),
-                    _decimal_to_text(portfolio.cash_krw),
-                    _decimal_to_text(portfolio.locked_cash_krw),
-                ),
-            )
 
     def get_paper_portfolio(self) -> object:
         from haley.paper import PaperPortfolio
 
-        row = self._connection.execute(
-            "SELECT * FROM paper_portfolio WHERE singleton_id = 1"
-        ).fetchone()
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM paper_portfolio WHERE singleton_id = 1"
+            ).fetchone()
         if row is None:
             raise KeyError("paper portfolio not found")
         return PaperPortfolio(

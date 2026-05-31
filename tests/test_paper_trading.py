@@ -1,4 +1,5 @@
 from decimal import Decimal
+from threading import Thread
 
 import pytest
 
@@ -225,3 +226,27 @@ def test_paper_portfolio_can_be_saved_loaded_and_reset() -> None:
 
     assert reset.cash_krw == Decimal("1000000")
     assert reset.locked_cash_krw == Decimal("0")
+
+
+def test_paper_portfolio_save_is_safe_for_concurrent_creates() -> None:
+    store = StateStore.in_memory()
+    errors: list[BaseException] = []
+
+    def save_portfolio() -> None:
+        try:
+            for _ in range(50):
+                store.save_paper_portfolio(
+                    PaperPortfolio(initial_cash_krw=Decimal("1000000"))
+                )
+                store.get_paper_portfolio()
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=save_portfolio) for _ in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert store.get_paper_portfolio().initial_cash_krw == Decimal("1000000")
