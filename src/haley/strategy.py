@@ -3,8 +3,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 
 from haley.market_data import Candle
+
+
+class ZoneStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    FILLED = "FILLED"
+    INVALIDATED = "INVALIDATED"
+    EXPIRED = "EXPIRED"
+
+
+@dataclass(frozen=True)
+class ZoneState:
+    zone_id: str
+    market: str
+    timeframe: str
+    lower: Decimal
+    upper: Decimal
+    status: ZoneStatus
+
+    @property
+    def can_create_signal(self) -> bool:
+        return self.status is ZoneStatus.ACTIVE
 
 
 @dataclass(frozen=True)
@@ -61,6 +83,53 @@ class SignalDecision:
 
 
 @dataclass(frozen=True)
+class StrategySignal:
+    strategy: str
+    market: str
+    signal_score: int
+    reasons: list[str]
+    entry_price: Decimal
+    stop_price: Decimal
+    target1_price: Decimal
+    target2_price: Decimal
+    invalidation_conditions: list[str]
+
+    def to_trade_plan(self, quote_amount: Decimal) -> TradePlan:
+        return TradePlan(
+            strategy=self.strategy,
+            market=self.market,
+            side="bid",
+            order_type="limit",
+            quote_amount=quote_amount,
+            entry_price=self.entry_price,
+            volume=quote_amount / self.entry_price,
+            stop_price=self.stop_price,
+            target1_price=self.target1_price,
+            target2_price=self.target2_price,
+            signal_score=self.signal_score,
+            reasons=list(self.reasons),
+            invalidation_conditions=list(self.invalidation_conditions),
+        )
+
+
+@dataclass(frozen=True)
+class TradePlan:
+    strategy: str
+    market: str
+    side: str
+    order_type: str
+    quote_amount: Decimal
+    entry_price: Decimal
+    volume: Decimal
+    stop_price: Decimal
+    target1_price: Decimal
+    target2_price: Decimal
+    signal_score: int
+    reasons: list[str]
+    invalidation_conditions: list[str]
+
+
+@dataclass(frozen=True)
 class CostModel:
     fee_rate: Decimal
     slippage_pct: Decimal
@@ -89,6 +158,28 @@ class BacktestOrderFillResult:
     status: str
     filled_volume: Decimal
     remaining_volume: Decimal
+
+
+@dataclass(frozen=True)
+class SignalReplayComparison:
+    matched_count: int
+    missing_in_paper: list[str]
+    extra_in_paper: list[str]
+
+    @classmethod
+    def compare(
+        cls,
+        *,
+        backtest_signal_ids: list[str],
+        paper_signal_ids: list[str],
+    ) -> SignalReplayComparison:
+        backtest = set(backtest_signal_ids)
+        paper = set(paper_signal_ids)
+        return cls(
+            matched_count=len(backtest & paper),
+            missing_in_paper=sorted(backtest - paper),
+            extra_in_paper=sorted(paper - backtest),
+        )
 
 
 class BacktestEngine:
@@ -138,6 +229,93 @@ class BacktestEngine:
             status="FILLED" if remaining == 0 else "PARTIALLY_FILLED",
             filled_volume=filled,
             remaining_volume=remaining,
+        )
+
+
+class UfsR1SignalEngine:
+    def __init__(
+        self,
+        reclaim_window: int = 2,
+        min_risk_reward: Decimal = Decimal("1.5"),
+    ) -> None:
+        self._reclaim_window = reclaim_window
+        self._min_risk_reward = min_risk_reward
+
+    def evaluate(
+        self,
+        market: str,
+        candles_5m: list[Candle],
+        candles_15m: list[Candle] | None = None,
+    ) -> StrategySignal | None:
+        if len(candles_5m) < 5:
+            return None
+        if candles_15m and not _trend_filter_allows_long(candles_15m):
+            return None
+
+        fvg_zones = detect_bullish_fvg(candles_5m)
+        ob_zones = detect_bullish_ob_candidates(
+            candles_5m,
+            impulse_min_range=_latest_positive_atr(candles_5m) * Decimal("0.5"),
+        )
+        if not fvg_zones or not ob_zones:
+            return None
+
+        fvg = fvg_zones[-1]
+        ob = ob_zones[-1]
+        if not _zones_overlap_enough(fvg.lower, fvg.upper, ob.lower, ob.upper):
+            return None
+
+        support = max(fvg.lower, ob.lower)
+        zone_created_at = max(fvg.created_at, ob.created_at)
+        post_zone_candles = [
+            candle for candle in candles_5m if candle.candle_time >= zone_created_at
+        ]
+        trap = detect_bullish_trap(
+            post_zone_candles,
+            level=support,
+            reclaim_window=self._reclaim_window,
+        )
+        if trap is None:
+            return None
+
+        entry = candles_5m[-1].close
+        atr = _latest_positive_atr(candles_5m)
+        fakeout_low = min(
+            candle.low
+            for candle in candles_5m
+            if trap.swept_at <= candle.candle_time <= trap.reclaimed_at
+        )
+        stop = min(fakeout_low, ob.lower, fvg.lower) - atr * Decimal("0.1")
+        unit_risk = entry - stop
+        if unit_risk <= 0:
+            return None
+
+        target1 = entry + unit_risk
+        target2 = entry + unit_risk * Decimal("2")
+        risk_reward = (target2 - entry) / unit_risk
+        if risk_reward < self._min_risk_reward:
+            return None
+
+        return StrategySignal(
+            strategy="UFS-R1",
+            market=market,
+            signal_score=90,
+            reasons=[
+                "BULLISH_FVG",
+                "BULLISH_OB",
+                "BULLISH_TRAP",
+                "RISK_REWARD_OK",
+            ],
+            entry_price=entry,
+            stop_price=stop,
+            target1_price=target1,
+            target2_price=target2,
+            invalidation_conditions=[
+                "CLOSE_BELOW_ZONE_LOW",
+                "UPPER_FAKE_OUT",
+                "DOWNTREND_FILTER",
+                "NO_PROGRESS",
+            ],
         )
 
 
@@ -304,3 +482,40 @@ def signal_from_pattern(
         can_create_trade_plan=hard_block_pass,
         reasons=hard_block_reasons,
     )
+
+
+def _latest_positive_atr(candles: list[Candle]) -> Decimal:
+    atr = calculate_atr(candles, period=14)
+    latest = atr[-1] if atr else Decimal("0")
+    return latest if latest > 0 else Decimal("1")
+
+
+def _zones_overlap_enough(
+    first_lower: Decimal,
+    first_upper: Decimal,
+    second_lower: Decimal,
+    second_upper: Decimal,
+) -> bool:
+    overlap = min(first_upper, second_upper) - max(first_lower, second_lower)
+    if overlap <= 0:
+        return False
+    smaller_width = min(first_upper - first_lower, second_upper - second_lower)
+    if smaller_width <= 0:
+        return False
+    return overlap / smaller_width >= Decimal("0.3")
+
+
+def _trend_filter_allows_long(candles: list[Candle]) -> bool:
+    if len(candles) < 2:
+        return True
+    channel = calculate_regression_channel(candles)
+    latest_close = candles[-1].close
+    latest_center = channel.center[-1] if channel.center else latest_close
+    if channel.slope < 0 and latest_close < latest_center:
+        return False
+
+    ema20 = calculate_ema(candles, period=20)
+    ema60 = calculate_ema(candles, period=60)
+    if ema20 and ema60 and ema20[-1] > ema60[-1]:
+        return True
+    return channel.slope > 0 or latest_close >= latest_center

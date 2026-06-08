@@ -64,6 +64,20 @@ class UpbitRestClient:
         response.raise_for_status()
         return list(response.json())
 
+    def list_minute_candles(
+        self,
+        market: str,
+        unit: int,
+        count: int = 100,
+    ) -> list[dict[str, Any]]:
+        response = self._http.get(
+            f"{self._base_url}/v1/candles/minutes/{unit}",
+            params={"market": market, "count": str(count)},
+            headers={"accept": "application/json"},
+        )
+        response.raise_for_status()
+        return list(response.json())
+
     def list_accounts(self) -> list[dict[str, Any]]:
         if self._auth is None:
             raise RuntimeError("Upbit account lookup requires auth")
@@ -74,6 +88,36 @@ class UpbitRestClient:
         response = self._http.get(f"{self._base_url}/v1/accounts", headers=headers)
         response.raise_for_status()
         return list(response.json())
+
+    def list_open_orders(self) -> list[dict[str, Any]]:
+        if self._auth is None:
+            raise RuntimeError("Upbit open order lookup requires auth")
+        headers = {
+            "accept": "application/json",
+            **self._auth.signed_headers(),
+        }
+        response = self._http.get(f"{self._base_url}/v1/orders/open", headers=headers)
+        response.raise_for_status()
+        return list(response.json())
+
+    def get_order_detail(self, identifier: str) -> dict[str, Any]:
+        if self._auth is None:
+            raise RuntimeError("Upbit order detail lookup requires auth")
+        params = {"identifier": identifier}
+        headers = {
+            "accept": "application/json",
+            **self._auth.signed_headers(query_string=build_query_string(params)),
+        }
+        response = self._http.get(
+            f"{self._base_url}/v1/order",
+            params=params,
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Upbit order detail response must be an object")
+        return dict(payload)
 
 
 def _jwt_encode(payload: dict[str, str], secret_key: str) -> str:

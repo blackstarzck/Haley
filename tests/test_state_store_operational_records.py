@@ -8,13 +8,16 @@ from haley.domain import (
     DataQualityState,
     ExecutionEventType,
     Fill,
+    ModeState,
     OrderSide,
     PositionState,
     ReconciliationState,
     ReconciliationStatus,
     RiskBlock,
     RiskBlockReason,
+    RuntimeMode,
 )
+from haley.paper import PaperPortfolio
 from haley.state_store import StateStore
 
 
@@ -146,3 +149,57 @@ def test_save_and_get_reconciliation_state() -> None:
     assert saved.status is ReconciliationStatus.MISMATCHED
     assert saved.mismatch_count == 2
     assert saved.last_checked_at == datetime(2026, 5, 31, 0, 0, tzinfo=UTC)
+
+
+def test_reconciliation_state_persists_user_resume_required() -> None:
+    store = StateStore.in_memory()
+    store.save_reconciliation_state(
+        ReconciliationState(
+            status=ReconciliationStatus.MATCHED,
+            mismatch_count=0,
+            operator_resume_required=True,
+        )
+    )
+
+    loaded = store.get_reconciliation_state()
+
+    assert loaded.status is ReconciliationStatus.MATCHED
+    assert loaded.operator_resume_required is True
+    assert loaded.allows_new_entry is False
+
+
+def test_reset_paper_experiment_state_resets_portfolio_in_one_store_call() -> None:
+    store = StateStore.in_memory()
+    store.save_paper_portfolio(PaperPortfolio(initial_cash_krw=Decimal("1000000")))
+    store.upsert_position(
+        PositionState(
+            market="KRW-XRP",
+            volume=Decimal("10"),
+            average_entry_price=Decimal("500"),
+        )
+    )
+
+    portfolio = store.reset_paper_experiment_state(initial_cash_krw=Decimal("2000000"))
+
+    assert portfolio.cash_krw == Decimal("2000000")
+    assert portfolio.locked_cash_krw == Decimal("0")
+    assert store.list_positions() == []
+    assert store.list_orders() == []
+
+
+def test_mode_state_can_be_saved_and_loaded() -> None:
+    store = StateStore.in_memory()
+    state = ModeState(
+        mode=RuntimeMode.KILL_SWITCHED,
+        live_trading_enabled=False,
+        paper_allow_real_order_api=False,
+        kill_switch_enabled=True,
+    )
+
+    store.save_mode_state(state)
+    loaded = store.get_mode_state()
+
+    assert loaded.mode is RuntimeMode.KILL_SWITCHED
+    assert loaded.kill_switch_enabled is True
+    assert loaded.live_trading_enabled is False
+    assert loaded.paper_allow_real_order_api is False

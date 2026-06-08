@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Obsidian Signal | UFS-R1 Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#fffaf7",
+                        "outline-variant": "#3b4b3d",
+                        "secondary-container": "#44474b",
+                        "secondary-fixed-dim": "#c5c6cb",
+                        "surface-variant": "#2d372e",
+                        "surface-container-low": "#141e16",
+                        "outline": "#849585",
+                        "on-secondary-container": "#b3b5b9",
+                        "tertiary-fixed-dim": "#e5c364",
+                        "inverse-primary": "#006d37",
+                        "on-tertiary-fixed-variant": "#584400",
+                        "surface-bright": "#323c32",
+                        "on-error": "#690005",
+                        "error-container": "#93000a",
+                        "on-tertiary-container": "#795f01",
+                        "on-primary": "#003919",
+                        "surface-card": "rgba(22, 26, 30, 0.7)",
+                        "on-tertiary-fixed": "#241a00",
+                        "on-background": "#dae6d8",
+                        "primary": "#f1ffef",
+                        "status-warning": "#FFB800",
+                        "primary-fixed-dim": "#00e479",
+                        "surface-container": "#18221a",
+                        "status-neutral": "#6B7280",
+                        "error": "#ffb4ab",
+                        "on-primary-container": "#007139",
+                        "status-pass": "#00FF88",
+                        "on-tertiary": "#3d2f00",
+                        "surface-tint": "#00e479",
+                        "surface-container-high": "#222c24",
+                        "tertiary-container": "#ffdb79",
+                        "primary-container": "#00ff88",
+                        "on-surface": "#dae6d8",
+                        "text-dim": "#94A3B8",
+                        "on-secondary-fixed": "#191c1f",
+                        "surface-container-highest": "#2d372e",
+                        "surface-dim": "#0c160e",
+                        "on-error-container": "#ffdad6",
+                        "secondary-fixed": "#e1e2e7",
+                        "inverse-surface": "#dae6d8",
+                        "primary-fixed": "#60ff99",
+                        "background": "#0c160e",
+                        "status-block": "#FF3B3B",
+                        "on-surface-variant": "#b9cbb9",
+                        "on-secondary": "#2e3134",
+                        "on-primary-fixed-variant": "#005228",
+                        "tertiary-fixed": "#ffe08d",
+                        "surface": "#0c160e",
+                        "inverse-on-surface": "#29332a",
+                        "on-secondary-fixed-variant": "#44474b",
+                        "secondary": "#c5c6cb",
+                        "on-primary-fixed": "#00210c",
+                        "border-glass": "rgba(255, 255, 255, 0.08)",
+                        "surface-container-lowest": "#071009"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "row-tight": "8px",
+                        "gutter": "16px",
+                        "container-margin": "24px",
+                        "section-gap": "32px",
+                        "widget-padding": "20px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "headline-xl": ["Inter"],
+                        "data-mono-md": ["JetBrains Mono"],
+                        "data-mono-lg": ["JetBrains Mono"],
+                        "headline-lg": ["Inter"],
+                        "data-mono-sm": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["11px", { "lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "700" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-xl": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "data-mono-md": ["14px", { "lineHeight": "20px", "fontWeight": "500" }],
+                        "data-mono-lg": ["18px", { "lineHeight": "24px", "fontWeight": "600" }],
+                        "headline-lg": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "data-mono-sm": ["12px", { "lineHeight": "16px", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #0B0E11; color: #dae6d8; overflow-x: hidden; }
+        .glass-panel {
+            background-color: rgba(22, 26, 30, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.25rem;
+        }
+        .neon-text-glow {
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+        .neon-pulse {
+            animation: pulse-glow 2s infinite alternate;
+        }
+        @keyframes pulse-glow {
+            from { text-shadow: 0 0 5px rgba(0, 255, 136, 0.2); }
+            to { text-shadow: 0 0 15px rgba(0, 255, 136, 0.8); }
+        }
+
+        /* Custom Scrollbar for tables/widgets */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+    </style>
+</head>
+<body class="flex h-screen w-full font-body-md bg-background text-on-surface antialiased">
+<!-- SideNavBar -->
+<nav class="h-screen w-64 fixed left-0 top-0 bg-surface dark:bg-surface border-r border-border-glass flex flex-col h-full py-6 z-50">
+<div class="px-6 mb-8">
+<h1 class="font-headline-lg text-headline-lg font-bold text-primary dark:text-primary">Obsidian Signal</h1>
+<p class="font-label-caps text-label-caps text-dim mt-1">UFS-R1 Strategy</p>
+</div>
+<div class="flex-1 px-4 space-y-1">
+<a class="flex items-center px-4 py-3 rounded-DEFAULT text-primary dark:text-primary font-bold border-r-2 border-primary bg-surface-container-high transition-colors active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined mr-3 text-primary">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+<a class="flex items-center px-4 py-3 rounded-DEFAULT text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined mr-3">precision_manufacturing</span>
+<span class="font-body-md text-body-md">Strategy</span>
+</a>
+<a class="flex items-center px-4 py-3 rounded-DEFAULT text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined mr-3">list_alt</span>
+<span class="font-body-md text-body-md">Orders</span>
+</a>
+<a class="flex items-center px-4 py-3 rounded-DEFAULT text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined mr-3">history_edu</span>
+<span class="font-body-md text-body-md">Audit Log</span>
+</a>
+<a class="flex items-center px-4 py-3 rounded-DEFAULT text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-high dark:hover:bg-surface-container-high transition-colors active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined mr-3">settings</span>
+<span class="font-body-md text-body-md">Settings</span>
+</a>
+</div>
+<div class="px-6 mt-auto">
+<button class="w-full py-3 bg-status-block hover:bg-error-container text-white font-label-caps text-label-caps rounded-DEFAULT transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined mr-2 text-[18px]">power_settings_new</span>
+                Kill Switch
+            </button>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="ml-64 flex flex-col flex-1 h-screen overflow-hidden">
+<!-- TopNavBar -->
+<header class="bg-surface/80 dark:bg-surface/80 backdrop-blur-md flex justify-between items-center w-full px-container-margin h-16 border-b border-border-glass sticky top-0 z-40">
+<div class="flex items-center space-x-6">
+<div class="flex space-x-4 font-label-caps text-label-caps">
+<span class="text-status-pass font-bold neon-pulse cursor-pointer">PAPER</span>
+<span class="text-dim hover:text-primary transition-opacity cursor-pointer">LIVE</span>
+</div>
+</div>
+<div class="flex items-center space-x-8">
+<div class="flex flex-col items-end">
+<span class="font-label-caps text-label-caps text-dim">Total Equity</span>
+<div class="flex items-baseline space-x-2">
+<span class="font-data-mono-lg text-data-mono-lg text-primary">1,240,500 KRW</span>
+<span class="font-data-mono-sm text-data-mono-sm text-status-pass">+2.4%</span>
+</div>
+</div>
+<div class="flex items-center space-x-4 text-dim">
+<span class="material-symbols-outlined hover:text-primary transition-opacity cursor-pointer">account_tree</span>
+<span class="material-symbols-outlined hover:text-primary transition-opacity cursor-pointer">sensors</span>
+<span class="material-symbols-outlined hover:text-primary transition-opacity cursor-pointer">schedule</span>
+<button class="ml-4 px-4 py-1.5 border border-border-glass rounded-DEFAULT font-label-caps text-label-caps hover:bg-surface-container-high transition-colors text-primary">
+                        Portfolio Summary
+                    </button>
+</div>
+</div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 overflow-y-auto p-container-margin">
+<div class="grid grid-cols-12 gap-section-gap h-full auto-rows-max">
+<!-- Row 1: Health & Risk -->
+<div class="col-span-12 xl:col-span-4 space-y-section-gap">
+<!-- Card 1: Bot Health -->
+<div class="glass-panel p-widget-padding">
+<h2 class="font-label-caps text-label-caps text-dim mb-4 border-b border-border-glass pb-2">SYSTEM STATUS</h2>
+<div class="space-y-4">
+<div class="flex justify-between items-center">
+<span class="font-body-md text-body-md text-on-surface-variant">Core Engine</span>
+<span class="font-data-mono-sm text-data-mono-sm text-status-pass px-2 py-0.5 bg-status-pass/10 rounded-DEFAULT border border-status-pass/20">OPERATIONAL</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-body-md text-body-md text-on-surface-variant">Kill Switch</span>
+<span class="font-data-mono-sm text-data-mono-sm text-status-neutral">INACTIVE</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-body-md text-body-md text-on-surface-variant">Active Blockers</span>
+<span class="font-data-mono-sm text-data-mono-sm text-status-neutral">NONE</span>
+</div>
+</div>
+</div>
+<!-- Card 4: Daily Risk Metrics -->
+<div class="glass-panel p-widget-padding">
+<h2 class="font-label-caps text-label-caps text-dim mb-4 border-b border-border-glass pb-2">RISK METRICS</h2>
+<div class="space-y-6">
+<div>
+<div class="flex justify-between mb-2">
+<span class="font-body-md text-body-md text-on-surface-variant">Max Daily Loss</span>
+<span class="font-data-mono-sm text-data-mono-sm text-primary">0.8% / 2.0%</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+<div class="bg-status-warning h-full rounded-full" style="width: 40%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between mb-2">
+<span class="font-body-md text-body-md text-on-surface-variant">Current Exposure</span>
+<span class="font-data-mono-sm text-data-mono-sm text-primary">45% / 60%</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+<div class="bg-status-pass h-full rounded-full" style="width: 75%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between mb-2">
+<span class="font-body-md text-body-md text-on-surface-variant">Correlation Limit</span>
+<span class="font-data-mono-sm text-data-mono-sm text-primary">0.42 / 0.70</span>
+</div>
+<div class="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary-fixed h-full rounded-full" style="width: 60%"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Row 1: Main Data (Watchlist & Positions) -->
+<div class="col-span-12 xl:col-span-8 flex flex-col space-y-section-gap h-[calc(100vh-140px)]">
+<!-- Card 3: Open Positions -->
+<div class="glass-panel flex flex-col flex-1 overflow-hidden">
+<div class="p-widget-padding border-b border-border-glass flex justify-between items-center">
+<h2 class="font-label-caps text-label-caps text-dim">OPEN POSITIONS</h2>
+<span class="font-data-mono-sm text-data-mono-sm text-primary bg-surface-container px-2 py-1 rounded-DEFAULT">3 ACTIVE</span>
+</div>
+<div class="flex-1 overflow-y-auto p-widget-padding">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="font-label-caps text-label-caps text-dim border-b border-white/5">
+<th class="pb-row-tight font-normal">ASSET</th>
+<th class="pb-row-tight font-normal text-right">ENTRY</th>
+<th class="pb-row-tight font-normal text-right">STOP-LOSS</th>
+<th class="pb-row-tight font-normal text-right">TARGET</th>
+<th class="pb-row-tight font-normal text-right">U-PNL</th>
+</tr>
+</thead>
+<tbody class="font-data-mono-md text-data-mono-md">
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-3 text-primary flex items-center">
+<span class="w-2 h-2 rounded-full bg-status-pass mr-2"></span> BTC/KRW
+                                        </td>
+<td class="py-3 text-right">82,400,000</td>
+<td class="py-3 text-right text-status-warning">81,000,000 <span class="text-dim text-[10px] ml-1">(-1.7%)</span></td>
+<td class="py-3 text-right">85,000,000</td>
+<td class="py-3 text-right text-status-pass">+45,200</td>
+</tr>
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-3 text-primary flex items-center">
+<span class="w-2 h-2 rounded-full bg-status-pass mr-2"></span> ETH/KRW
+                                        </td>
+<td class="py-3 text-right">4,520,000</td>
+<td class="py-3 text-right text-status-warning">4,400,000 <span class="text-dim text-[10px] ml-1">(-2.6%)</span></td>
+<td class="py-3 text-right">4,800,000</td>
+<td class="py-3 text-right text-status-pass">+12,500</td>
+</tr>
+<tr class="hover:bg-surface-container-high/50 transition-colors">
+<td class="py-3 text-primary flex items-center">
+<span class="w-2 h-2 rounded-full bg-status-block mr-2"></span> SOL/KRW
+                                        </td>
+<td class="py-3 text-right">185,000</td>
+<td class="py-3 text-right text-status-warning">178,000 <span class="text-dim text-[10px] ml-1">(-3.7%)</span></td>
+<td class="py-3 text-right">205,000</td>
+<td class="py-3 text-right text-status-block">-4,800</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Card 2: Market Watchlist -->
+<div class="glass-panel flex flex-col flex-1 overflow-hidden">
+<div class="p-widget-padding border-b border-border-glass">
+<h2 class="font-label-caps text-label-caps text-dim">SETUP WATCHLIST</h2>
+</div>
+<div class="flex-1 overflow-y-auto p-widget-padding">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="font-label-caps text-label-caps text-dim border-b border-white/5">
+<th class="pb-row-tight font-normal">TICKER</th>
+<th class="pb-row-tight font-normal text-right">PRICE (KRW)</th>
+<th class="pb-row-tight font-normal text-right">24H VOL</th>
+<th class="pb-row-tight font-normal text-right">SIGNAL SCORE</th>
+</tr>
+</thead>
+<tbody class="font-data-mono-md text-data-mono-md">
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-2 text-on-surface">XRP</td>
+<td class="py-2 text-right">845</td>
+<td class="py-2 text-right text-dim">1.2B</td>
+<td class="py-2 text-right text-status-pass neon-text-glow">88/100</td>
+</tr>
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-2 text-on-surface">ADA</td>
+<td class="py-2 text-right">620</td>
+<td class="py-2 text-right text-dim">450M</td>
+<td class="py-2 text-right text-primary-fixed">75/100</td>
+</tr>
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-2 text-on-surface">DOGE</td>
+<td class="py-2 text-right">215</td>
+<td class="py-2 text-right text-dim">890M</td>
+<td class="py-2 text-right text-status-warning">62/100</td>
+</tr>
+<tr class="border-b border-white/5 hover:bg-surface-container-high/50 transition-colors">
+<td class="py-2 text-on-surface">AVAX</td>
+<td class="py-2 text-right">52,100</td>
+<td class="py-2 text-right text-dim">320M</td>
+<td class="py-2 text-right text-dim">45/100</td>
+</tr>
+<tr class="hover:bg-surface-container-high/50 transition-colors">
+<td class="py-2 text-on-surface">LINK</td>
+<td class="py-2 text-right">24,500</td>
+<td class="py-2 text-right text-dim">280M</td>
+<td class="py-2 text-right text-dim">30/100</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-border-glass fixed bottom-0 right-0 left-64 flex justify-between items-center px-gutter py-2 z-40">
+<span class="font-data-mono-sm text-data-mono-sm text-status-pass dark:text-status-pass">Signal Health: Operational</span>
+<div class="flex space-x-6">
+<span class="font-data-mono-sm text-data-mono-sm text-dim hover:text-primary transition-opacity">WebSocket: 12ms</span>
+<span class="font-data-mono-sm text-data-mono-sm text-dim hover:text-primary transition-opacity">REST: 45ms</span>
+<span class="font-data-mono-sm text-data-mono-sm text-dim hover:text-primary transition-opacity">Circuit Breaker: Normal</span>
+</div>
+</footer>
+</div>
+</body></html>

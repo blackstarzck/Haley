@@ -41,7 +41,12 @@ def test_order_coordinator_creates_planned_limit_bid_order() -> None:
 
 @pytest.mark.parametrize(
     "blocking_status",
-    [OrderStatus.SUBMITTING, OrderStatus.UNKNOWN, OrderStatus.PARTIALLY_FILLED],
+    [
+        OrderStatus.SUBMITTING,
+        OrderStatus.UNKNOWN,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCEL_FAILED,
+    ],
 )
 def test_order_coordinator_blocks_same_market_when_unsettled_order_exists(
     blocking_status: OrderStatus,
@@ -91,6 +96,31 @@ def test_order_coordinator_blocks_same_market_when_unsettled_order_exists(
             idempotency_key="idem-partial",
             operator_id="local-user",
             reason="partial fill",
+        )
+    elif blocking_status is OrderStatus.CANCEL_FAILED:
+        store.transition_order(
+            order_id=order.order_id,
+            next_status=OrderStatus.ACCEPTED,
+            request_id="req-accepted",
+            idempotency_key="idem-accepted",
+            operator_id="local-user",
+            reason="accepted",
+        )
+        store.transition_order(
+            order_id=order.order_id,
+            next_status=OrderStatus.CANCEL_REQUESTED,
+            request_id="req-cancel",
+            idempotency_key="idem-cancel",
+            operator_id="local-user",
+            reason="cancel requested",
+        )
+        store.transition_order(
+            order_id=order.order_id,
+            next_status=OrderStatus.CANCEL_FAILED,
+            request_id="req-cancel-failed",
+            idempotency_key="idem-cancel-failed",
+            operator_id="local-user",
+            reason="cancel failed",
         )
 
     with pytest.raises(DuplicateMarketOrderError, match="KRW-XRP"):

@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 import sqlite3
+from threading import Event, Thread
+import time
 
 import pytest
 
@@ -10,8 +12,38 @@ from haley.domain import (
     OrderSide,
     OrderStatus,
     OrderType,
+    RiskBlock,
+    RiskBlockReason,
 )
 from haley.state_store import StateStore, StateStoreConstraintError
+
+
+class ConcurrentUseDetectingConnection(sqlite3.Connection):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._active_risk_block_operation = False
+        self._risk_block_select_entered = Event()
+
+    @property
+    def risk_block_select_entered(self) -> Event:
+        return self._risk_block_select_entered
+
+    def execute(self, sql: str, parameters: object = (), /) -> sqlite3.Cursor:
+        normalized = " ".join(sql.lower().split())
+        should_guard = "risk_blocks" in normalized
+        if not should_guard:
+            return super().execute(sql, parameters)
+
+        if self._active_risk_block_operation:
+            raise AssertionError("sqlite connection was used concurrently")
+        self._active_risk_block_operation = True
+        try:
+            if normalized.startswith("select") and "from risk_blocks" in normalized:
+                self._risk_block_select_entered.set()
+                time.sleep(0.05)
+            return super().execute(sql, parameters)
+        finally:
+            self._active_risk_block_operation = False
 
 
 def make_intent(
@@ -140,3 +172,40 @@ def test_stale_order_version_cannot_transition() -> None:
             reason="stale transition",
             expected_version=1,
         )
+
+
+def test_risk_block_reads_and_writes_are_serialized_on_shared_connection() -> None:
+    connection = sqlite3.connect(
+        ":memory:",
+        check_same_thread=False,
+        factory=ConcurrentUseDetectingConnection,
+    )
+    store = StateStore(connection)
+    errors: list[BaseException] = []
+
+    def list_blocks() -> None:
+        try:
+            store.list_risk_blocks()
+        except BaseException as exc:  # pragma: no cover - reported below.
+            errors.append(exc)
+
+    thread = Thread(target=list_blocks)
+    thread.start()
+    assert connection.risk_block_select_entered.wait(timeout=1)
+
+    try:
+        store.record_risk_block(
+            RiskBlock(
+                reason=RiskBlockReason.DATA_STALE,
+                market="KRW-XRP",
+                detail="Market data is stale.",
+            )
+        )
+    except BaseException as exc:  # pragma: no cover - reported below.
+        errors.append(exc)
+
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert len(store.list_risk_blocks()) == 1

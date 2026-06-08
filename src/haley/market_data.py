@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import AsyncIterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -35,6 +35,24 @@ class Candle:
     @property
     def can_create_pattern(self) -> bool:
         return not self.synthetic
+
+
+@dataclass(frozen=True)
+class CandleUseDecision:
+    usable: bool
+    signal_eligible_at: datetime
+
+
+@dataclass(frozen=True)
+class CandleUsePolicy:
+    candle_grace_ms: int
+
+    def evaluate(self, *, closed_at: datetime, now: datetime) -> CandleUseDecision:
+        eligible_at = closed_at + timedelta(milliseconds=self.candle_grace_ms)
+        return CandleUseDecision(
+            usable=now >= eligible_at,
+            signal_eligible_at=eligible_at,
+        )
 
 
 class CandleStore:
@@ -80,10 +98,28 @@ class DataQualityMonitor:
         websocket_price: Decimal | None,
         market_warning: bool = False,
         orderbook_gap: bool = False,
+        last_ticker_received_at: datetime | None = None,
+        last_trade_received_at: datetime | None = None,
+        last_orderbook_received_at: datetime | None = None,
+        last_candle_received_at: datetime | None = None,
     ) -> DataQualityState:
+        feed_times = [
+            item
+            for item in (
+                last_ticker_received_at,
+                last_trade_received_at,
+                last_orderbook_received_at,
+                last_candle_received_at,
+            )
+            if item is not None
+        ]
         stale = (
             last_ws_received_at is None
             or (now - last_ws_received_at).total_seconds() * 1000 > self.stale_timeout_ms
+            or any(
+                (now - feed_time).total_seconds() * 1000 > self.stale_timeout_ms
+                for feed_time in feed_times
+            )
         )
         mismatch = _price_mismatch(
             rest_price=rest_price,
@@ -96,6 +132,10 @@ class DataQualityMonitor:
             market_warning=market_warning,
             orderbook_gap=orderbook_gap,
             last_ws_received_at=last_ws_received_at,
+            last_ticker_received_at=last_ticker_received_at,
+            last_trade_received_at=last_trade_received_at,
+            last_orderbook_received_at=last_orderbook_received_at,
+            last_candle_received_at=last_candle_received_at,
         )
 
 
@@ -156,6 +196,26 @@ def parse_upbit_candle_message(message: dict[str, object]) -> Candle:
         low=Decimal(str(message["low_price"])),
         close=Decimal(str(message["trade_price"])),
         volume=Decimal(str(message["candle_acc_trade_volume"])),
+    )
+
+
+def parse_upbit_rest_minute_candle(
+    market: str,
+    unit: int,
+    payload: dict[str, object],
+) -> Candle:
+    candle_time = datetime.fromisoformat(
+        f"{payload['candle_date_time_utc']}+00:00"
+    ).astimezone(UTC)
+    return Candle(
+        market=market,
+        timeframe=f"{unit}m",
+        candle_time=candle_time,
+        open=Decimal(str(payload["opening_price"])),
+        high=Decimal(str(payload["high_price"])),
+        low=Decimal(str(payload["low_price"])),
+        close=Decimal(str(payload["trade_price"])),
+        volume=Decimal(str(payload["candle_acc_trade_volume"])),
     )
 
 

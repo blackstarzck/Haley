@@ -118,6 +118,7 @@ BLOCKS_NEW_ENTRY_STATUSES = frozenset(
         OrderStatus.SUBMITTING,
         OrderStatus.UNKNOWN,
         OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCEL_FAILED,
     }
 )
 
@@ -223,13 +224,24 @@ class PositionState:
     volume: Decimal
     average_entry_price: Decimal
     realized_pnl: Decimal = Decimal("0")
+    unrealized_pnl: Decimal = Decimal("0")
     stop_protected: bool = False
+    stop_price: Decimal | None = None
+    target1_price: Decimal | None = None
+    target2_price: Decimal | None = None
+    trailing_stop_price: Decimal | None = None
+    management_stage: str = "OPEN"
     updated_at: datetime = field(default_factory=_utc_now)
 
     def __post_init__(self) -> None:
         _require_decimal("volume", self.volume)
         _require_decimal("average_entry_price", self.average_entry_price)
         _require_decimal("realized_pnl", self.realized_pnl)
+        _require_decimal("unrealized_pnl", self.unrealized_pnl)
+        _require_decimal("stop_price", self.stop_price)
+        _require_decimal("target1_price", self.target1_price)
+        _require_decimal("target2_price", self.target2_price)
+        _require_decimal("trailing_stop_price", self.trailing_stop_price)
 
 
 @dataclass(frozen=True)
@@ -237,10 +249,12 @@ class StopProtectionState:
     market: str
     position_volume: Decimal
     protected: bool = False
+    stop_price: Decimal | None = None
     created_at: datetime = field(default_factory=_utc_now)
 
     def __post_init__(self) -> None:
         _require_decimal("position_volume", self.position_volume)
+        _require_decimal("stop_price", self.stop_price)
 
 
 @dataclass(frozen=True)
@@ -275,6 +289,10 @@ class DataQualityState:
     orderbook_gap: bool = False
     last_ws_received_at: datetime | None = None
     last_rest_sync_at: datetime | None = None
+    last_ticker_received_at: datetime | None = None
+    last_trade_received_at: datetime | None = None
+    last_orderbook_received_at: datetime | None = None
+    last_candle_received_at: datetime | None = None
 
     @property
     def allows_new_entry(self) -> bool:
@@ -291,10 +309,15 @@ class ReconciliationState:
     status: ReconciliationStatus = ReconciliationStatus.NOT_STARTED
     mismatch_count: int = 0
     last_checked_at: datetime | None = None
+    operator_resume_required: bool = False
 
     @property
     def allows_new_entry(self) -> bool:
-        return self.status is ReconciliationStatus.MATCHED and self.mismatch_count == 0
+        return (
+            self.status is ReconciliationStatus.MATCHED
+            and self.mismatch_count == 0
+            and not self.operator_resume_required
+        )
 
 
 @dataclass(frozen=True)

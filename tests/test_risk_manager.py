@@ -71,6 +71,22 @@ def test_risk_manager_blocks_reconciliation_mismatch() -> None:
     assert RiskBlockReason.RECOVERY_INCOMPLETE in decision.reasons
 
 
+def test_recovery_matched_still_blocks_until_user_resume_confirmed() -> None:
+    store = StateStore.in_memory()
+    store.save_reconciliation_state(
+        ReconciliationState(
+            status=ReconciliationStatus.MATCHED,
+            mismatch_count=0,
+            operator_resume_required=True,
+        )
+    )
+
+    decision = RiskManager(store).evaluate_new_entry(RiskContext(mode=ModeState()))
+
+    assert decision.allowed is False
+    assert RiskBlockReason.RECOVERY_INCOMPLETE in decision.reasons
+
+
 def test_risk_manager_blocks_unprotected_positions() -> None:
     store = StateStore.in_memory()
     store.upsert_position(

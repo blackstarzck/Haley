@@ -96,6 +96,33 @@ def test_paper_execution_engine_never_calls_real_order_api() -> None:
     assert len(store.list_fills("order-1")) == 1
 
 
+def test_paper_fill_records_reference_price_gap() -> None:
+    store = StateStore.in_memory()
+    portfolio = PaperPortfolio(initial_cash_krw=Decimal("1000000"))
+    engine = PaperExecutionEngine(
+        store=store,
+        portfolio=portfolio,
+        fee_rate=Decimal("0"),
+    )
+
+    gap = engine.calculate_reference_price_gap(
+        paper_fill_price=Decimal("101"),
+        reference_price=Decimal("100"),
+    )
+
+    assert gap == Decimal("0.01")
+
+
+def test_paper_portfolio_normalizes_small_locked_cash_residue_on_load() -> None:
+    portfolio = PaperPortfolio(
+        initial_cash_krw=Decimal("1000000"),
+        cash_krw=Decimal("949975.0000"),
+        locked_cash_krw=Decimal("-2E-23"),
+    )
+
+    assert portfolio.locked_cash_krw == Decimal("0")
+
+
 def test_paper_partial_buy_fill_locks_cash_and_marks_order_partially_filled() -> None:
     store = StateStore.in_memory()
     portfolio = PaperPortfolio(initial_cash_krw=Decimal("1000000"))
@@ -185,6 +212,85 @@ def test_paper_full_buy_fill_releases_locked_cash_and_marks_order_filled() -> No
 
     assert portfolio.locked_cash_krw == Decimal("0.0000")
     assert store.get_order(order.order_id).status is OrderStatus.FILLED
+
+
+def test_paper_full_buy_fill_normalizes_decimal_locked_cash_residue() -> None:
+    store = StateStore.in_memory()
+    portfolio = PaperPortfolio(initial_cash_krw=Decimal("1000000"))
+    coordinator = OrderCoordinator(store)
+    price = Decimal("369")
+    volume = Decimal("50000") / price
+    order = coordinator.create_entry_order(
+        market="KRW-XLM",
+        side=OrderSide.BID,
+        order_type=OrderType.LIMIT,
+        quote_amount=Decimal("50000"),
+        volume=volume,
+        limit_price=price,
+        exchange_identifier=None,
+        state_change=make_state_change(),
+    )
+    store.transition_order(
+        order.order_id,
+        OrderStatus.SUBMITTING,
+        "req-submit",
+        "idem-submit",
+        "local-user",
+        "paper submit",
+    )
+    store.transition_order(
+        order.order_id,
+        OrderStatus.ACCEPTED,
+        "req-accepted",
+        "idem-accepted",
+        "local-user",
+        "paper accepted",
+    )
+    engine = PaperExecutionEngine(
+        store=store,
+        portfolio=portfolio,
+        fee_rate=Decimal("0.0005"),
+    )
+
+    engine.reserve_buy_order(order.order_id)
+    engine.fill_buy_order(
+        order_id=order.order_id,
+        price=price,
+        volume=volume,
+        state_change=make_state_change(),
+    )
+
+    assert portfolio.locked_cash_krw == Decimal("0")
+
+
+def test_paper_reserve_buy_order_rejects_insufficient_cash() -> None:
+    store = StateStore.in_memory()
+    portfolio = PaperPortfolio(initial_cash_krw=Decimal("1000"))
+    store.save_paper_portfolio(portfolio)
+    coordinator = OrderCoordinator(store)
+    order = coordinator.create_entry_order(
+        market="KRW-XRP",
+        side=OrderSide.BID,
+        order_type=OrderType.LIMIT,
+        quote_amount=Decimal("5000"),
+        volume=Decimal("10"),
+        limit_price=Decimal("500"),
+        exchange_identifier=None,
+        state_change=StateChangeRequest(
+            request_id="req",
+            idempotency_key="idem",
+            operator_id="tester",
+            reason="insufficient cash test",
+        ),
+    )
+    engine = PaperExecutionEngine(
+        store=store,
+        portfolio=portfolio,
+        fee_rate=Decimal("0.0005"),
+    )
+
+    with pytest.raises(ValueError, match="insufficient paper cash"):
+        engine.reserve_buy_order(order.order_id)
 
 
 def test_paper_blocks_averaging_down_on_losing_position() -> None:

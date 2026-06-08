@@ -75,6 +75,7 @@ def test_unsettled_order_statuses_block_same_market_new_entry() -> None:
         OrderStatus.SUBMITTING,
         OrderStatus.UNKNOWN,
         OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCEL_FAILED,
     }
 
 

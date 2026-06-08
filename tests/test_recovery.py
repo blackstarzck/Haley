@@ -23,7 +23,7 @@ class FakeExchange:
         return (self.order_details or {})[identifier]
 
 
-def test_recovery_manager_records_balance_lookup_and_reconciliation_running() -> None:
+def test_recovery_manager_records_balance_lookup_and_matched_completion() -> None:
     store = StateStore.in_memory()
     manager = RecoveryManager(
         store=store,
@@ -32,11 +32,36 @@ def test_recovery_manager_records_balance_lookup_and_reconciliation_running() ->
 
     run = manager.run()
 
-    assert run.status is RecoveryStepStatus.RUNNING
+    assert run.status is RecoveryStepStatus.SUCCEEDED
     assert run.steps[0].name == "balance_lookup"
     assert run.steps[0].status is RecoveryStepStatus.SUCCEEDED
     assert run.steps[0].detail == "accounts=1"
-    assert store.get_reconciliation_state().status is ReconciliationStatus.RUNNING
+    assert store.get_reconciliation_state().status is ReconciliationStatus.MATCHED
+
+
+def test_recovery_run_exposes_run_id_and_reconciliation_status() -> None:
+    store = StateStore.in_memory()
+    exchange = FakeExchange(accounts=[], open_orders=[])
+
+    run = RecoveryManager(store=store, exchange=exchange).run()
+
+    assert run.recovery_run_id.startswith("recovery_")
+    assert run.reconciliation_status is ReconciliationStatus.MATCHED
+    assert run.status is RecoveryStepStatus.SUCCEEDED
+
+
+def test_recovery_manager_marks_matched_but_requires_user_resume_when_no_mismatches() -> None:
+    store = StateStore.in_memory()
+    exchange = FakeExchange(accounts=[], open_orders=[])
+    manager = RecoveryManager(store=store, exchange=exchange)
+
+    run = manager.run()
+    saved = store.get_reconciliation_state()
+
+    assert run.reconciliation_status is ReconciliationStatus.MATCHED
+    assert saved.status is ReconciliationStatus.MATCHED
+    assert saved.operator_resume_required is True
+    assert saved.allows_new_entry is False
 
 
 def test_recovery_manager_records_failure_without_secret_details() -> None:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
+from uuid import uuid4
 
 from haley.domain import ReconciliationState, ReconciliationStatus
 from haley.security import REDACTED
@@ -25,7 +27,9 @@ class RecoveryStep:
 
 @dataclass(frozen=True)
 class RecoveryRun:
+    recovery_run_id: str
     status: RecoveryStepStatus
+    reconciliation_status: ReconciliationStatus
     steps: list[RecoveryStep]
 
 
@@ -35,6 +39,7 @@ class RecoveryManager:
         self._exchange = exchange
 
     def run(self) -> RecoveryRun:
+        recovery_run_id = f"recovery_{uuid4().hex}"
         self._store.save_reconciliation_state(
             ReconciliationState(status=ReconciliationStatus.RUNNING)
         )
@@ -46,7 +51,9 @@ class RecoveryManager:
                 ReconciliationState(status=ReconciliationStatus.FAILED)
             )
             return RecoveryRun(
+                recovery_run_id=recovery_run_id,
                 status=RecoveryStepStatus.FAILED,
+                reconciliation_status=ReconciliationStatus.FAILED,
                 steps=[
                     RecoveryStep(
                         name="balance_lookup",
@@ -82,13 +89,6 @@ class RecoveryManager:
             if not _local_exchange_identifier_exists(self._store, identifier):
                 mismatch_count += 1
 
-        if mismatch_count:
-            self._store.save_reconciliation_state(
-                ReconciliationState(
-                    status=ReconciliationStatus.MISMATCHED,
-                    mismatch_count=mismatch_count,
-                )
-            )
         steps.append(
             RecoveryStep(
                 name="order_detail_reconciliation",
@@ -97,7 +97,28 @@ class RecoveryManager:
             )
         )
 
-        return RecoveryRun(status=RecoveryStepStatus.RUNNING, steps=steps)
+        reconciliation_status = (
+            ReconciliationStatus.MATCHED
+            if mismatch_count == 0
+            else ReconciliationStatus.MISMATCHED
+        )
+        self._store.save_reconciliation_state(
+            ReconciliationState(
+                status=reconciliation_status,
+                mismatch_count=mismatch_count,
+                last_checked_at=datetime.now(UTC),
+                operator_resume_required=reconciliation_status
+                is ReconciliationStatus.MATCHED,
+            )
+        )
+        return RecoveryRun(
+            recovery_run_id=recovery_run_id,
+            status=RecoveryStepStatus.SUCCEEDED
+            if reconciliation_status is ReconciliationStatus.MATCHED
+            else RecoveryStepStatus.FAILED,
+            reconciliation_status=reconciliation_status,
+            steps=steps,
+        )
 
 
 def _redact_text(value: str) -> str:

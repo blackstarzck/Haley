@@ -7,6 +7,12 @@ from haley.strategy import (
     BacktestLimitOrder,
     CostModel,
     SignalDecision,
+    SignalReplayComparison,
+    StrategySignal,
+    TradePlan,
+    UfsR1SignalEngine,
+    ZoneState,
+    ZoneStatus,
     calculate_atr,
     calculate_regression_channel,
     calculate_ema,
@@ -37,6 +43,30 @@ def candle(
         volume=Decimal("100"),
         synthetic=synthetic,
     )
+
+
+def test_invalidated_zone_cannot_create_signal() -> None:
+    zone = ZoneState(
+        zone_id="zone-1",
+        market="KRW-XRP",
+        timeframe="5m",
+        lower=Decimal("100"),
+        upper=Decimal("110"),
+        status=ZoneStatus.INVALIDATED,
+    )
+
+    assert zone.can_create_signal is False
+
+
+def test_signal_replay_comparison_finds_missing_paper_signal() -> None:
+    comparison = SignalReplayComparison.compare(
+        backtest_signal_ids=["KRW-XRP:2026-06-07T00:00:00"],
+        paper_signal_ids=[],
+    )
+
+    assert comparison.matched_count == 0
+    assert comparison.missing_in_paper == ["KRW-XRP:2026-06-07T00:00:00"]
+    assert comparison.extra_in_paper == []
 
 
 def test_detect_bullish_fvg_uses_three_candles_and_excludes_synthetic() -> None:
@@ -205,3 +235,95 @@ def test_backtest_limit_order_no_fill_when_price_does_not_cross() -> None:
 
     assert result.status == "ACCEPTED"
     assert result.filled_volume == Decimal("0")
+
+
+def test_ufs_r1_signal_engine_returns_signal_with_trade_plan_fields() -> None:
+    candles = [
+        candle(0, high="100", low="90", close="96", open_="98"),
+        candle(1, high="105", low="92", close="94", open_="102"),
+        candle(2, high="130", low="110", close="125", open_="112"),
+        candle(3, high="118", low="95", close="98", open_="116"),
+        candle(4, high="112", low="97", close="106", open_="99"),
+    ]
+    engine = UfsR1SignalEngine()
+
+    signal = engine.evaluate(market="KRW-XRP", candles_5m=candles)
+    assert signal == StrategySignal(
+        strategy="UFS-R1",
+        market="KRW-XRP",
+        signal_score=90,
+        reasons=[
+            "BULLISH_FVG",
+            "BULLISH_OB",
+            "BULLISH_TRAP",
+            "RISK_REWARD_OK",
+        ],
+        entry_price=Decimal("106"),
+        stop_price=Decimal("89.92"),
+        target1_price=Decimal("122.08"),
+        target2_price=Decimal("138.16"),
+        invalidation_conditions=[
+            "CLOSE_BELOW_ZONE_LOW",
+            "UPPER_FAKE_OUT",
+            "DOWNTREND_FILTER",
+            "NO_PROGRESS",
+        ],
+    )
+
+    plan = signal.to_trade_plan(quote_amount=Decimal("50000"))
+
+    assert plan == TradePlan(
+        strategy="UFS-R1",
+        market="KRW-XRP",
+        side="bid",
+        order_type="limit",
+        quote_amount=Decimal("50000"),
+        entry_price=Decimal("106"),
+        volume=Decimal("471.6981132075471698113207547"),
+        stop_price=Decimal("89.92"),
+        target1_price=Decimal("122.08"),
+        target2_price=Decimal("138.16"),
+        signal_score=90,
+        reasons=signal.reasons,
+        invalidation_conditions=signal.invalidation_conditions,
+    )
+
+
+def test_ufs_r1_signal_engine_does_not_use_synthetic_for_patterns() -> None:
+    candles = [
+        candle(0, high="100", low="90", close="96", open_="98"),
+        candle(1, high="105", low="92", close="94", open_="102", synthetic=True),
+        candle(2, high="130", low="110", close="125", open_="112"),
+        candle(3, high="118", low="95", close="98", open_="116"),
+        candle(4, high="112", low="97", close="106", open_="99"),
+    ]
+    engine = UfsR1SignalEngine()
+
+    signal = engine.evaluate(market="KRW-XRP", candles_5m=candles)
+
+    assert signal is None
+
+
+def test_ufs_r1_signal_engine_blocks_long_below_falling_15m_channel_center() -> None:
+    candles = [
+        candle(0, high="100", low="90", close="96", open_="98"),
+        candle(1, high="105", low="92", close="94", open_="102"),
+        candle(2, high="130", low="110", close="125", open_="112"),
+        candle(3, high="118", low="95", close="98", open_="116"),
+        candle(4, high="112", low="97", close="106", open_="99"),
+    ]
+    candles_15m = [
+        candle(0, high="150", low="145", close="148"),
+        candle(1, high="140", low="135", close="138"),
+        candle(2, high="130", low="125", close="128"),
+        candle(3, high="120", low="115", close="116"),
+    ]
+    engine = UfsR1SignalEngine()
+
+    signal = engine.evaluate(
+        market="KRW-XRP",
+        candles_5m=candles,
+        candles_15m=candles_15m,
+    )
+
+    assert signal is None

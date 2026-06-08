@@ -5,11 +5,13 @@ from decimal import Decimal
 from haley.market_data import (
     Candle,
     CandleStore,
+    CandleUsePolicy,
     DataQualityMonitor,
     MarketDataCollector,
     build_upbit_websocket_subscription,
     market_event_to_data_quality,
     parse_upbit_candle_message,
+    parse_upbit_rest_minute_candle,
     select_top_krw_alt_markets,
 )
 
@@ -66,6 +68,24 @@ def test_synthetic_candle_can_feed_indicators_but_not_patterns() -> None:
     assert not candle.can_create_pattern
 
 
+def test_candle_use_policy_waits_for_grace_period() -> None:
+    closed_at = datetime(2026, 6, 7, 0, 0, tzinfo=UTC)
+    policy = CandleUsePolicy(candle_grace_ms=500)
+
+    early = policy.evaluate(
+        closed_at=closed_at,
+        now=closed_at + timedelta(milliseconds=499),
+    )
+    ready = policy.evaluate(
+        closed_at=closed_at,
+        now=closed_at + timedelta(milliseconds=500),
+    )
+
+    assert early.usable is False
+    assert early.signal_eligible_at == closed_at + timedelta(milliseconds=500)
+    assert ready.usable is True
+
+
 def test_data_quality_monitor_detects_stale_and_price_mismatch() -> None:
     monitor = DataQualityMonitor(stale_timeout_ms=5000, price_mismatch_pct=Decimal("0.01"))
     now = datetime(2026, 5, 31, 0, 0, tzinfo=UTC)
@@ -88,6 +108,29 @@ def test_data_quality_monitor_detects_stale_and_price_mismatch() -> None:
     assert stale.stale
     assert not stale.rest_ws_mismatch
     assert mismatch.rest_ws_mismatch
+
+
+def test_data_quality_monitor_tracks_ticker_trade_orderbook_and_candle_freshness() -> None:
+    monitor = DataQualityMonitor(stale_timeout_ms=5000, price_mismatch_pct=Decimal("0.01"))
+    now = datetime(2026, 5, 31, 0, 0, tzinfo=UTC)
+
+    state = monitor.evaluate(
+        market="KRW-XRP",
+        now=now,
+        last_ws_received_at=now,
+        rest_price=Decimal("500"),
+        websocket_price=Decimal("500"),
+        last_ticker_received_at=now,
+        last_trade_received_at=now - timedelta(milliseconds=6000),
+        last_orderbook_received_at=now,
+        last_candle_received_at=now,
+    )
+
+    assert state.stale
+    assert state.last_ticker_received_at == now
+    assert state.last_trade_received_at == now - timedelta(milliseconds=6000)
+    assert state.last_orderbook_received_at == now
+    assert state.last_candle_received_at == now
 
 
 def test_build_upbit_websocket_subscription_uses_public_quotation_types() -> None:
@@ -151,6 +194,25 @@ def test_parse_upbit_candle_message_to_candle() -> None:
 
     assert candle.market == "KRW-XRP"
     assert candle.timeframe == "1m"
+    assert candle.close == Decimal("505")
+
+
+def test_parse_upbit_rest_minute_candle_to_candle() -> None:
+    candle = parse_upbit_rest_minute_candle(
+        market="KRW-XRP",
+        unit=5,
+        payload={
+            "candle_date_time_utc": "2026-05-31T00:00:00",
+            "opening_price": 500,
+            "high_price": 510,
+            "low_price": 490,
+            "trade_price": 505,
+            "candle_acc_trade_volume": 123.45,
+        },
+    )
+
+    assert candle.market == "KRW-XRP"
+    assert candle.timeframe == "5m"
     assert candle.close == Decimal("505")
 
 

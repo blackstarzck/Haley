@@ -16,6 +16,7 @@ from haley.domain import (
     ExecutionEvent,
     ExecutionEventType,
     Fill,
+    ModeState,
     OrderIntent,
     OrderSide,
     OrderState,
@@ -26,6 +27,7 @@ from haley.domain import (
     ReconciliationStatus,
     RiskBlock,
     RiskBlockReason,
+    RuntimeMode,
     StopProtectionState,
 )
 
@@ -55,90 +57,94 @@ class StateStore:
         order_id = f"order_{uuid4().hex}"
         now = _utc_now()
         try:
-            with self._connection:
-                self._connection.execute(
-                    """
-                    INSERT INTO orders (
-                        order_id,
-                        client_order_key,
-                        exchange_identifier,
-                        market,
-                        side,
-                        order_type,
-                        quote_amount,
-                        volume,
-                        limit_price,
-                        request_hash,
-                        created_at,
-                        status,
-                        version,
-                        updated_at
+            with self._lock:
+                with self._connection:
+                    self._connection.execute(
+                        """
+                        INSERT INTO orders (
+                            order_id,
+                            client_order_key,
+                            exchange_identifier,
+                            market,
+                            side,
+                            order_type,
+                            quote_amount,
+                            volume,
+                            limit_price,
+                            request_hash,
+                            created_at,
+                            status,
+                            version,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            order_id,
+                            intent.client_order_key,
+                            intent.exchange_identifier,
+                            intent.market,
+                            intent.side.value,
+                            intent.order_type.value,
+                            _decimal_to_text(intent.quote_amount),
+                            _decimal_to_text(intent.volume),
+                            _decimal_to_text(intent.limit_price),
+                            intent.request_hash,
+                            intent.created_at.isoformat(),
+                            OrderStatus.PLANNED.value,
+                            1,
+                            now.isoformat(),
+                        ),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        order_id,
-                        intent.client_order_key,
-                        intent.exchange_identifier,
-                        intent.market,
-                        intent.side.value,
-                        intent.order_type.value,
-                        _decimal_to_text(intent.quote_amount),
-                        _decimal_to_text(intent.volume),
-                        _decimal_to_text(intent.limit_price),
-                        intent.request_hash,
-                        intent.created_at.isoformat(),
-                        OrderStatus.PLANNED.value,
-                        1,
-                        now.isoformat(),
-                    ),
-                )
-                self._insert_execution_event(
-                    ExecutionEvent(
-                        event_id=f"evt_{uuid4().hex}",
-                        order_id=order_id,
-                        event_type=ExecutionEventType.ORDER_INTENT_CREATED,
-                        occurred_at=now,
-                        payload={"status": OrderStatus.PLANNED.value},
+                    self._insert_execution_event(
+                        ExecutionEvent(
+                            event_id=f"evt_{uuid4().hex}",
+                            order_id=order_id,
+                            event_type=ExecutionEventType.ORDER_INTENT_CREATED,
+                            occurred_at=now,
+                            payload={"status": OrderStatus.PLANNED.value},
+                        )
                     )
-                )
         except sqlite3.IntegrityError as exc:
             raise StateStoreConstraintError(_constraint_message(exc)) from exc
         return order_id
 
     def get_order(self, order_id: str) -> OrderState:
-        row = self._connection.execute(
-            "SELECT * FROM orders WHERE order_id = ?", (order_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyError(f"order not found: {order_id}")
-        return _row_to_order_state(row)
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM orders WHERE order_id = ?", (order_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"order not found: {order_id}")
+            return _row_to_order_state(row)
 
     def list_orders_for_market(
         self, market: str, statuses: set[OrderStatus] | None = None
     ) -> list[OrderState]:
-        if statuses is None:
-            rows = self._connection.execute(
-                "SELECT * FROM orders WHERE market = ? ORDER BY created_at ASC",
-                (market,),
-            ).fetchall()
-        else:
-            placeholders = ",".join("?" for _ in statuses)
-            rows = self._connection.execute(
-                f"""
-                SELECT * FROM orders
-                WHERE market = ? AND status IN ({placeholders})
-                ORDER BY created_at ASC
-                """,
-                (market, *(status.value for status in statuses)),
-            ).fetchall()
-        return [_row_to_order_state(row) for row in rows]
+        with self._lock:
+            if statuses is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM orders WHERE market = ? ORDER BY created_at ASC",
+                    (market,),
+                ).fetchall()
+            else:
+                placeholders = ",".join("?" for _ in statuses)
+                rows = self._connection.execute(
+                    f"""
+                    SELECT * FROM orders
+                    WHERE market = ? AND status IN ({placeholders})
+                    ORDER BY created_at ASC
+                    """,
+                    (market, *(status.value for status in statuses)),
+                ).fetchall()
+            return [_row_to_order_state(row) for row in rows]
 
     def list_orders(self) -> list[OrderState]:
-        rows = self._connection.execute(
-            "SELECT * FROM orders ORDER BY created_at ASC"
-        ).fetchall()
-        return [_row_to_order_state(row) for row in rows]
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM orders ORDER BY created_at ASC"
+            ).fetchall()
+            return [_row_to_order_state(row) for row in rows]
 
     def transition_order(
         self,
@@ -150,328 +156,419 @@ class StateStore:
         reason: str,
         expected_version: int | None = None,
     ) -> OrderState:
-        current = self.get_order(order_id)
-        if expected_version is not None and current.version != expected_version:
-            raise StateStoreConstraintError("order version conflict")
-        updated = current.transition_to(next_status)
-        now = _utc_now()
-
-        with self._connection:
-            cursor = self._connection.execute(
-                """
-                UPDATE orders
-                SET status = ?, version = ?, updated_at = ?
-                WHERE order_id = ? AND version = ?
-                """,
-                (
-                    updated.status.value,
-                    updated.version,
-                    now.isoformat(),
-                    order_id,
-                    current.version,
-                ),
-            )
-            if cursor.rowcount != 1:
+        with self._lock:
+            current = self.get_order(order_id)
+            if expected_version is not None and current.version != expected_version:
                 raise StateStoreConstraintError("order version conflict")
-            self._insert_execution_event(
-                ExecutionEvent(
-                    event_id=f"evt_{uuid4().hex}",
-                    order_id=order_id,
-                    event_type=ExecutionEventType.ORDER_TRANSITION,
-                    occurred_at=now,
-                    payload={
-                        "from": current.status.value,
-                        "to": updated.status.value,
-                    },
-                    request_id=request_id,
-                    idempotency_key=idempotency_key,
-                    operator_id=operator_id,
-                    reason=reason,
-                )
-            )
+            updated = current.transition_to(next_status)
+            now = _utc_now()
 
-        return self.get_order(order_id)
+            with self._connection:
+                cursor = self._connection.execute(
+                    """
+                    UPDATE orders
+                    SET status = ?, version = ?, updated_at = ?
+                    WHERE order_id = ? AND version = ?
+                    """,
+                    (
+                        updated.status.value,
+                        updated.version,
+                        now.isoformat(),
+                        order_id,
+                        current.version,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise StateStoreConstraintError("order version conflict")
+                self._insert_execution_event(
+                    ExecutionEvent(
+                        event_id=f"evt_{uuid4().hex}",
+                        order_id=order_id,
+                        event_type=ExecutionEventType.ORDER_TRANSITION,
+                        occurred_at=now,
+                        payload={
+                            "from": current.status.value,
+                            "to": updated.status.value,
+                        },
+                        request_id=request_id,
+                        idempotency_key=idempotency_key,
+                        operator_id=operator_id,
+                        reason=reason,
+                    )
+                )
+
+            return self.get_order(order_id)
 
     def append_execution_event(self, event: ExecutionEvent) -> None:
-        with self._connection:
-            self._insert_execution_event(event)
+        with self._lock:
+            with self._connection:
+                self._insert_execution_event(event)
 
     def list_execution_events(self, order_id: str | None = None) -> list[ExecutionEvent]:
-        if order_id is None:
-            rows = self._connection.execute(
-                "SELECT * FROM execution_events ORDER BY seq ASC"
-            ).fetchall()
-        else:
-            rows = self._connection.execute(
-                """
-                SELECT * FROM execution_events
-                WHERE order_id = ?
-                ORDER BY seq ASC
-                """,
-                (order_id,),
-            ).fetchall()
-        return [_row_to_execution_event(row) for row in rows]
+        with self._lock:
+            if order_id is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM execution_events ORDER BY seq ASC"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """
+                    SELECT * FROM execution_events
+                    WHERE order_id = ?
+                    ORDER BY seq ASC
+                    """,
+                    (order_id,),
+                ).fetchall()
+            return [_row_to_execution_event(row) for row in rows]
 
     def save_fill(self, fill: Fill) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO fills (
-                    fill_id,
-                    order_id,
-                    market,
-                    side,
-                    price,
-                    volume,
-                    fee,
-                    filled_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    fill.fill_id,
-                    fill.order_id,
-                    fill.market,
-                    fill.side.value,
-                    _decimal_to_text(fill.price),
-                    _decimal_to_text(fill.volume),
-                    _decimal_to_text(fill.fee),
-                    fill.filled_at.isoformat(),
-                ),
-            )
-
-    def list_fills(self, order_id: str | None = None) -> list[Fill]:
-        if order_id is None:
-            rows = self._connection.execute("SELECT * FROM fills ORDER BY filled_at ASC").fetchall()
-        else:
-            rows = self._connection.execute(
-                "SELECT * FROM fills WHERE order_id = ? ORDER BY filled_at ASC",
-                (order_id,),
-            ).fetchall()
-        return [_row_to_fill(row) for row in rows]
-
-    def upsert_position(self, position: PositionState) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO positions (
-                    market,
-                    volume,
-                    average_entry_price,
-                    realized_pnl,
-                    stop_protected,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(market) DO UPDATE SET
-                    volume = excluded.volume,
-                    average_entry_price = excluded.average_entry_price,
-                    realized_pnl = excluded.realized_pnl,
-                    stop_protected = excluded.stop_protected,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    position.market,
-                    _decimal_to_text(position.volume),
-                    _decimal_to_text(position.average_entry_price),
-                    _decimal_to_text(position.realized_pnl),
-                    1 if position.stop_protected else 0,
-                    position.updated_at.isoformat(),
-                ),
-            )
-
-    def list_positions(self) -> list[PositionState]:
-        rows = self._connection.execute(
-            "SELECT * FROM positions ORDER BY market ASC"
-        ).fetchall()
-        return [_row_to_position(row) for row in rows]
-
-    def create_stop_protection(self, state: StopProtectionState) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO stop_protections (
-                    market,
-                    position_volume,
-                    protected,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    state.market,
-                    _decimal_to_text(state.position_volume),
-                    1 if state.protected else 0,
-                    state.created_at.isoformat(),
-                ),
-            )
-
-    def list_stop_protections(self, market: str | None = None) -> list[StopProtectionState]:
-        if market is None:
-            rows = self._connection.execute(
-                "SELECT * FROM stop_protections ORDER BY seq ASC"
-            ).fetchall()
-        else:
-            rows = self._connection.execute(
-                "SELECT * FROM stop_protections WHERE market = ? ORDER BY seq ASC",
-                (market,),
-            ).fetchall()
-        return [_row_to_stop_protection(row) for row in rows]
-
-    def record_risk_block(self, block: RiskBlock) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO risk_blocks (reason, market, detail, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    block.reason.value,
-                    block.market,
-                    block.detail,
-                    block.created_at.isoformat(),
-                ),
-            )
-
-    def list_risk_blocks(self) -> list[RiskBlock]:
-        rows = self._connection.execute(
-            "SELECT * FROM risk_blocks ORDER BY seq ASC"
-        ).fetchall()
-        return [_row_to_risk_block(row) for row in rows]
-
-    def create_alert(self, alert: Alert) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO alerts (
-                    alert_id,
-                    severity,
-                    message,
-                    created_at,
-                    acknowledged_at
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    alert.alert_id,
-                    alert.severity.value,
-                    alert.message,
-                    alert.created_at.isoformat(),
-                    None
-                    if alert.acknowledged_at is None
-                    else alert.acknowledged_at.isoformat(),
-                ),
-            )
-
-    def ack_alert(self, alert_id: str, acknowledged_at: datetime | None = None) -> None:
-        with self._connection:
-            self._connection.execute(
-                "UPDATE alerts SET acknowledged_at = ? WHERE alert_id = ?",
-                ((_utc_now() if acknowledged_at is None else acknowledged_at).isoformat(), alert_id),
-            )
-
-    def list_alerts(self) -> list[Alert]:
-        rows = self._connection.execute(
-            "SELECT * FROM alerts ORDER BY created_at ASC"
-        ).fetchall()
-        return [_row_to_alert(row) for row in rows]
-
-    def upsert_data_quality_state(self, market: str, state: DataQualityState) -> None:
-        with self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO data_quality_states (
-                    market,
-                    stale,
-                    rest_ws_mismatch,
-                    market_warning,
-                    orderbook_gap,
-                    last_ws_received_at,
-                    last_rest_sync_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(market) DO UPDATE SET
-                    stale = excluded.stale,
-                    rest_ws_mismatch = excluded.rest_ws_mismatch,
-                    market_warning = excluded.market_warning,
-                    orderbook_gap = excluded.orderbook_gap,
-                    last_ws_received_at = excluded.last_ws_received_at,
-                    last_rest_sync_at = excluded.last_rest_sync_at
-                """,
-                (
-                    market,
-                    1 if state.stale else 0,
-                    1 if state.rest_ws_mismatch else 0,
-                    1 if state.market_warning else 0,
-                    1 if state.orderbook_gap else 0,
-                    None
-                    if state.last_ws_received_at is None
-                    else state.last_ws_received_at.isoformat(),
-                    None
-                    if state.last_rest_sync_at is None
-                    else state.last_rest_sync_at.isoformat(),
-                ),
-            )
-
-    def list_data_quality_states(self) -> dict[str, DataQualityState]:
-        rows = self._connection.execute(
-            "SELECT * FROM data_quality_states ORDER BY market ASC"
-        ).fetchall()
-        return {row["market"]: _row_to_data_quality_state(row) for row in rows}
-
-    def save_reconciliation_state(self, state: ReconciliationState) -> None:
-        with self._connection:
-            self._connection.execute("DELETE FROM reconciliation_state")
-            self._connection.execute(
-                """
-                INSERT INTO reconciliation_state (
-                    singleton_id,
-                    status,
-                    mismatch_count,
-                    last_checked_at
-                )
-                VALUES (1, ?, ?, ?)
-                """,
-                (
-                    state.status.value,
-                    state.mismatch_count,
-                    None
-                    if state.last_checked_at is None
-                    else state.last_checked_at.isoformat(),
-                ),
-            )
-
-    def get_reconciliation_state(self) -> ReconciliationState:
-        row = self._connection.execute(
-            "SELECT * FROM reconciliation_state WHERE singleton_id = 1"
-        ).fetchone()
-        if row is None:
-            return ReconciliationState()
-        return _row_to_reconciliation_state(row)
-
-    def save_paper_portfolio(self, portfolio: object) -> None:
         with self._lock:
             with self._connection:
                 self._connection.execute(
                     """
-                    INSERT INTO paper_portfolio (
-                        singleton_id,
-                        initial_cash_krw,
-                        cash_krw,
-                        locked_cash_krw
+                    INSERT INTO fills (
+                        fill_id,
+                        order_id,
+                        market,
+                        side,
+                        price,
+                        volume,
+                        fee,
+                        filled_at
                     )
-                    VALUES (1, ?, ?, ?)
-                    ON CONFLICT(singleton_id) DO UPDATE SET
-                        initial_cash_krw = excluded.initial_cash_krw,
-                        cash_krw = excluded.cash_krw,
-                        locked_cash_krw = excluded.locked_cash_krw
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        _decimal_to_text(portfolio.initial_cash_krw),
-                        _decimal_to_text(portfolio.cash_krw),
-                        _decimal_to_text(portfolio.locked_cash_krw),
+                        fill.fill_id,
+                        fill.order_id,
+                        fill.market,
+                        fill.side.value,
+                        _decimal_to_text(fill.price),
+                        _decimal_to_text(fill.volume),
+                        _decimal_to_text(fill.fee),
+                        fill.filled_at.isoformat(),
                     ),
                 )
+
+    def list_fills(self, order_id: str | None = None) -> list[Fill]:
+        with self._lock:
+            if order_id is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM fills ORDER BY filled_at ASC"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    "SELECT * FROM fills WHERE order_id = ? ORDER BY filled_at ASC",
+                    (order_id,),
+                ).fetchall()
+            return [_row_to_fill(row) for row in rows]
+
+    def upsert_position(self, position: PositionState) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO positions (
+                        market,
+                        volume,
+                        average_entry_price,
+                        realized_pnl,
+                        unrealized_pnl,
+                        stop_protected,
+                        stop_price,
+                        target1_price,
+                        target2_price,
+                        trailing_stop_price,
+                        management_stage,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(market) DO UPDATE SET
+                        volume = excluded.volume,
+                        average_entry_price = excluded.average_entry_price,
+                        realized_pnl = excluded.realized_pnl,
+                        unrealized_pnl = excluded.unrealized_pnl,
+                        stop_protected = excluded.stop_protected,
+                        stop_price = excluded.stop_price,
+                        target1_price = excluded.target1_price,
+                        target2_price = excluded.target2_price,
+                        trailing_stop_price = excluded.trailing_stop_price,
+                        management_stage = excluded.management_stage,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        position.market,
+                        _decimal_to_text(position.volume),
+                        _decimal_to_text(position.average_entry_price),
+                        _decimal_to_text(position.realized_pnl),
+                        _decimal_to_text(position.unrealized_pnl),
+                        1 if position.stop_protected else 0,
+                        _decimal_to_text(position.stop_price),
+                        _decimal_to_text(position.target1_price),
+                        _decimal_to_text(position.target2_price),
+                        _decimal_to_text(position.trailing_stop_price),
+                        position.management_stage,
+                        position.updated_at.isoformat(),
+                    ),
+                )
+
+    def list_positions(self) -> list[PositionState]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM positions ORDER BY market ASC"
+            ).fetchall()
+            return [_row_to_position(row) for row in rows]
+
+    def create_stop_protection(self, state: StopProtectionState) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO stop_protections (
+                        market,
+                        position_volume,
+                        protected,
+                        stop_price,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        state.market,
+                        _decimal_to_text(state.position_volume),
+                        1 if state.protected else 0,
+                        _decimal_to_text(state.stop_price),
+                        state.created_at.isoformat(),
+                    ),
+                )
+
+    def list_stop_protections(self, market: str | None = None) -> list[StopProtectionState]:
+        with self._lock:
+            if market is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM stop_protections ORDER BY seq ASC"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    "SELECT * FROM stop_protections WHERE market = ? ORDER BY seq ASC",
+                    (market,),
+                ).fetchall()
+            return [_row_to_stop_protection(row) for row in rows]
+
+    def record_risk_block(self, block: RiskBlock) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO risk_blocks (reason, market, detail, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        block.reason.value,
+                        block.market,
+                        block.detail,
+                        block.created_at.isoformat(),
+                    ),
+                )
+
+    def list_risk_blocks(self) -> list[RiskBlock]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM risk_blocks ORDER BY seq ASC"
+            ).fetchall()
+            return [_row_to_risk_block(row) for row in rows]
+
+    def create_alert(self, alert: Alert) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO alerts (
+                        alert_id,
+                        severity,
+                        message,
+                        created_at,
+                        acknowledged_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        alert.alert_id,
+                        alert.severity.value,
+                        alert.message,
+                        alert.created_at.isoformat(),
+                        None
+                        if alert.acknowledged_at is None
+                        else alert.acknowledged_at.isoformat(),
+                    ),
+                )
+
+    def ack_alert(self, alert_id: str, acknowledged_at: datetime | None = None) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    "UPDATE alerts SET acknowledged_at = ? WHERE alert_id = ?",
+                    (
+                        (_utc_now() if acknowledged_at is None else acknowledged_at).isoformat(),
+                        alert_id,
+                    ),
+                )
+
+    def list_alerts(self) -> list[Alert]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM alerts ORDER BY created_at ASC"
+            ).fetchall()
+            return [_row_to_alert(row) for row in rows]
+
+    def upsert_data_quality_state(self, market: str, state: DataQualityState) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO data_quality_states (
+                        market,
+                        stale,
+                        rest_ws_mismatch,
+                        market_warning,
+                        orderbook_gap,
+                        last_ws_received_at,
+                        last_rest_sync_at,
+                        last_ticker_received_at,
+                        last_trade_received_at,
+                        last_orderbook_received_at,
+                        last_candle_received_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(market) DO UPDATE SET
+                        stale = excluded.stale,
+                        rest_ws_mismatch = excluded.rest_ws_mismatch,
+                        market_warning = excluded.market_warning,
+                        orderbook_gap = excluded.orderbook_gap,
+                        last_ws_received_at = excluded.last_ws_received_at,
+                        last_rest_sync_at = excluded.last_rest_sync_at,
+                        last_ticker_received_at = excluded.last_ticker_received_at,
+                        last_trade_received_at = excluded.last_trade_received_at,
+                        last_orderbook_received_at = excluded.last_orderbook_received_at,
+                        last_candle_received_at = excluded.last_candle_received_at
+                    """,
+                    (
+                        market,
+                        1 if state.stale else 0,
+                        1 if state.rest_ws_mismatch else 0,
+                        1 if state.market_warning else 0,
+                        1 if state.orderbook_gap else 0,
+                        None
+                        if state.last_ws_received_at is None
+                        else state.last_ws_received_at.isoformat(),
+                        None
+                        if state.last_rest_sync_at is None
+                        else state.last_rest_sync_at.isoformat(),
+                        None
+                        if state.last_ticker_received_at is None
+                        else state.last_ticker_received_at.isoformat(),
+                        None
+                        if state.last_trade_received_at is None
+                        else state.last_trade_received_at.isoformat(),
+                        None
+                        if state.last_orderbook_received_at is None
+                        else state.last_orderbook_received_at.isoformat(),
+                        None
+                        if state.last_candle_received_at is None
+                        else state.last_candle_received_at.isoformat(),
+                    ),
+                )
+
+    def list_data_quality_states(self) -> dict[str, DataQualityState]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM data_quality_states ORDER BY market ASC"
+            ).fetchall()
+            return {row["market"]: _row_to_data_quality_state(row) for row in rows}
+
+    def save_mode_state(self, state: ModeState) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO mode_state (
+                        singleton_id,
+                        mode,
+                        live_trading_enabled,
+                        paper_allow_real_order_api,
+                        kill_switch_enabled,
+                        updated_at
+                    )
+                    VALUES (1, ?, ?, ?, ?, ?)
+                    ON CONFLICT(singleton_id) DO UPDATE SET
+                        mode = excluded.mode,
+                        live_trading_enabled = excluded.live_trading_enabled,
+                        paper_allow_real_order_api = excluded.paper_allow_real_order_api,
+                        kill_switch_enabled = excluded.kill_switch_enabled,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        state.mode.value,
+                        1 if state.live_trading_enabled else 0,
+                        1 if state.paper_allow_real_order_api else 0,
+                        1 if state.kill_switch_enabled else 0,
+                        state.updated_at.isoformat(),
+                    ),
+                )
+
+    def get_mode_state(self) -> ModeState:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM mode_state WHERE singleton_id = 1"
+            ).fetchone()
+            if row is None:
+                return ModeState()
+            return ModeState(
+                mode=RuntimeMode(row["mode"]),
+                live_trading_enabled=bool(row["live_trading_enabled"]),
+                paper_allow_real_order_api=bool(row["paper_allow_real_order_api"]),
+                kill_switch_enabled=bool(row["kill_switch_enabled"]),
+                updated_at=_datetime_from_text(row["updated_at"]),
+            )
+
+    def save_reconciliation_state(self, state: ReconciliationState) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute("DELETE FROM reconciliation_state")
+                self._connection.execute(
+                    """
+                    INSERT INTO reconciliation_state (
+                        singleton_id,
+                        status,
+                        mismatch_count,
+                        last_checked_at,
+                        operator_resume_required
+                    )
+                    VALUES (1, ?, ?, ?, ?)
+                    """,
+                    (
+                        state.status.value,
+                        state.mismatch_count,
+                        None
+                        if state.last_checked_at is None
+                        else state.last_checked_at.isoformat(),
+                        1 if state.operator_resume_required else 0,
+                    ),
+                )
+
+    def get_reconciliation_state(self) -> ReconciliationState:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM reconciliation_state WHERE singleton_id = 1"
+            ).fetchone()
+            if row is None:
+                return ReconciliationState()
+            return _row_to_reconciliation_state(row)
+
+    def save_paper_portfolio(self, portfolio: object) -> None:
+        with self._lock:
+            with self._connection:
+                self._save_paper_portfolio_unlocked(portfolio)
 
     def get_paper_portfolio(self) -> object:
         from haley.paper import PaperPortfolio
@@ -480,12 +577,237 @@ class StateStore:
             row = self._connection.execute(
                 "SELECT * FROM paper_portfolio WHERE singleton_id = 1"
             ).fetchone()
-        if row is None:
-            raise KeyError("paper portfolio not found")
-        return PaperPortfolio(
-            initial_cash_krw=Decimal(row["initial_cash_krw"]),
-            cash_krw=Decimal(row["cash_krw"]),
-            locked_cash_krw=Decimal(row["locked_cash_krw"]),
+            if row is None:
+                raise KeyError("paper portfolio not found")
+            return PaperPortfolio(
+                initial_cash_krw=Decimal(row["initial_cash_krw"]),
+                cash_krw=Decimal(row["cash_krw"]),
+                locked_cash_krw=Decimal(row["locked_cash_krw"]),
+            )
+
+    def reset_paper_experiment_state(self, initial_cash_krw: Decimal) -> object:
+        from haley.paper import PaperPortfolio
+
+        portfolio = PaperPortfolio(initial_cash_krw=initial_cash_krw)
+        with self._lock:
+            with self._connection:
+                self._connection.execute("DELETE FROM fills")
+                self._connection.execute("DELETE FROM orders")
+                self._connection.execute("DELETE FROM positions")
+                self._connection.execute("DELETE FROM stop_protections")
+                self._connection.execute("DELETE FROM risk_blocks")
+                self._connection.execute("DELETE FROM alerts")
+                self._connection.execute("DELETE FROM data_quality_states")
+                self._connection.execute("DELETE FROM reconciliation_state")
+                self._save_paper_portfolio_unlocked(portfolio)
+        return portfolio
+
+    def create_experiment_session(self, session: object) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO experiment_sessions (
+                        session_id,
+                        strategy_version,
+                        initial_cash_krw,
+                        markets_json,
+                        started_at,
+                        stopped_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session.session_id,
+                        session.strategy_version,
+                        _decimal_to_text(session.initial_cash_krw),
+                        json.dumps(session.markets),
+                        session.started_at.isoformat(),
+                        None
+                        if session.stopped_at is None
+                        else session.stopped_at.isoformat(),
+                    ),
+                )
+
+    def list_experiment_sessions(self) -> list[object]:
+        from haley.experiments import ExperimentSession
+
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM experiment_sessions ORDER BY started_at ASC"
+            ).fetchall()
+            return [
+                ExperimentSession(
+                    session_id=row["session_id"],
+                    strategy_version=row["strategy_version"],
+                    initial_cash_krw=Decimal(row["initial_cash_krw"]),
+                    markets=list(json.loads(row["markets_json"])),
+                    started_at=_datetime_from_text(row["started_at"]),
+                    stopped_at=None
+                    if row["stopped_at"] is None
+                    else _datetime_from_text(row["stopped_at"]),
+                )
+                for row in rows
+            ]
+
+    def save_signal_journal_entry(self, entry: object) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO signal_journal (
+                        entry_id,
+                        session_id,
+                        market,
+                        strategy,
+                        signal_score,
+                        reasons_json,
+                        rejected_reasons_json,
+                        entry_price,
+                        stop_price,
+                        target1_price,
+                        target2_price,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        entry.entry_id,
+                        entry.session_id,
+                        entry.market,
+                        entry.strategy,
+                        entry.signal_score,
+                        json.dumps(entry.reasons),
+                        json.dumps(entry.rejected_reasons),
+                        _decimal_to_text(entry.entry_price),
+                        _decimal_to_text(entry.stop_price),
+                        _decimal_to_text(entry.target1_price),
+                        _decimal_to_text(entry.target2_price),
+                        entry.created_at.isoformat(),
+                    ),
+                )
+
+    def list_signal_journal_entries(self, session_id: str) -> list[object]:
+        from haley.experiments import SignalJournalEntry
+
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM signal_journal
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [
+                SignalJournalEntry(
+                    entry_id=row["entry_id"],
+                    session_id=row["session_id"],
+                    market=row["market"],
+                    strategy=row["strategy"],
+                    signal_score=row["signal_score"],
+                    reasons=list(json.loads(row["reasons_json"])),
+                    rejected_reasons=list(json.loads(row["rejected_reasons_json"])),
+                    entry_price=_decimal_from_text(row["entry_price"]),
+                    stop_price=_decimal_from_text(row["stop_price"]),
+                    target1_price=_decimal_from_text(row["target1_price"]),
+                    target2_price=_decimal_from_text(row["target2_price"]),
+                    created_at=_datetime_from_text(row["created_at"]),
+                )
+                for row in rows
+            ]
+
+    def save_paper_performance_report(self, report: object) -> None:
+        with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO paper_performance_reports (
+                        session_id,
+                        realized_pnl_krw,
+                        fee_krw,
+                        net_pnl_krw,
+                        trade_count,
+                        win_count,
+                        loss_count,
+                        win_rate,
+                        max_drawdown_krw,
+                        average_r,
+                        mae_krw,
+                        mfe_krw,
+                        signal_count,
+                        blocked_count
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        report.session_id,
+                        _decimal_to_text(report.realized_pnl_krw),
+                        _decimal_to_text(report.fee_krw),
+                        _decimal_to_text(report.net_pnl_krw),
+                        report.trade_count,
+                        report.win_count,
+                        report.loss_count,
+                        _decimal_to_text(report.win_rate),
+                        _decimal_to_text(report.max_drawdown_krw),
+                        _decimal_to_text(report.average_r),
+                        _decimal_to_text(report.mae_krw),
+                        _decimal_to_text(report.mfe_krw),
+                        report.signal_count,
+                        report.blocked_count,
+                    ),
+                )
+
+    def get_latest_paper_performance_report(self) -> object | None:
+        from haley.experiments import PaperPerformanceReport
+
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM paper_performance_reports
+                ORDER BY seq DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            return PaperPerformanceReport(
+                session_id=row["session_id"],
+                realized_pnl_krw=Decimal(row["realized_pnl_krw"]),
+                fee_krw=Decimal(row["fee_krw"]),
+                net_pnl_krw=Decimal(row["net_pnl_krw"]),
+                trade_count=row["trade_count"],
+                win_count=row["win_count"],
+                loss_count=row["loss_count"],
+                win_rate=Decimal(row["win_rate"]),
+                max_drawdown_krw=Decimal(row["max_drawdown_krw"]),
+                average_r=Decimal(row["average_r"]),
+                mae_krw=Decimal(row["mae_krw"]),
+                mfe_krw=Decimal(row["mfe_krw"]),
+                signal_count=row["signal_count"],
+                blocked_count=row["blocked_count"],
+            )
+
+    def _save_paper_portfolio_unlocked(self, portfolio: object) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO paper_portfolio (
+                singleton_id,
+                initial_cash_krw,
+                cash_krw,
+                locked_cash_krw
+            )
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton_id) DO UPDATE SET
+                initial_cash_krw = excluded.initial_cash_krw,
+                cash_krw = excluded.cash_krw,
+                locked_cash_krw = excluded.locked_cash_krw
+            """,
+            (
+                _decimal_to_text(portfolio.initial_cash_krw),
+                _decimal_to_text(portfolio.cash_krw),
+                _decimal_to_text(portfolio.locked_cash_krw),
+            ),
         )
 
     def _insert_execution_event(self, event: ExecutionEvent) -> None:
@@ -592,7 +914,13 @@ class StateStore:
                     volume TEXT NOT NULL,
                     average_entry_price TEXT NOT NULL,
                     realized_pnl TEXT NOT NULL,
+                    unrealized_pnl TEXT NOT NULL DEFAULT '0',
                     stop_protected INTEGER NOT NULL,
+                    stop_price TEXT,
+                    target1_price TEXT,
+                    target2_price TEXT,
+                    trailing_stop_price TEXT,
+                    management_stage TEXT NOT NULL DEFAULT 'OPEN',
                     updated_at TEXT NOT NULL
                 );
 
@@ -601,6 +929,7 @@ class StateStore:
                     market TEXT NOT NULL,
                     position_volume TEXT NOT NULL,
                     protected INTEGER NOT NULL,
+                    stop_price TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -627,14 +956,28 @@ class StateStore:
                     market_warning INTEGER NOT NULL,
                     orderbook_gap INTEGER NOT NULL,
                     last_ws_received_at TEXT,
-                    last_rest_sync_at TEXT
+                    last_rest_sync_at TEXT,
+                    last_ticker_received_at TEXT,
+                    last_trade_received_at TEXT,
+                    last_orderbook_received_at TEXT,
+                    last_candle_received_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS mode_state (
+                    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                    mode TEXT NOT NULL,
+                    live_trading_enabled INTEGER NOT NULL,
+                    paper_allow_real_order_api INTEGER NOT NULL,
+                    kill_switch_enabled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS reconciliation_state (
                     singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
                     status TEXT NOT NULL,
                     mismatch_count INTEGER NOT NULL,
-                    last_checked_at TEXT
+                    last_checked_at TEXT,
+                    operator_resume_required INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS paper_portfolio (
@@ -643,7 +986,77 @@ class StateStore:
                     cash_krw TEXT NOT NULL,
                     locked_cash_krw TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS experiment_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    strategy_version TEXT NOT NULL,
+                    initial_cash_krw TEXT NOT NULL,
+                    markets_json TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    stopped_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS signal_journal (
+                    entry_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    market TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    signal_score INTEGER NOT NULL,
+                    reasons_json TEXT NOT NULL,
+                    rejected_reasons_json TEXT NOT NULL,
+                    entry_price TEXT,
+                    stop_price TEXT,
+                    target1_price TEXT,
+                    target2_price TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS paper_performance_reports (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    realized_pnl_krw TEXT NOT NULL,
+                    fee_krw TEXT NOT NULL,
+                    net_pnl_krw TEXT NOT NULL,
+                    trade_count INTEGER NOT NULL,
+                    win_count INTEGER NOT NULL,
+                    loss_count INTEGER NOT NULL,
+                    win_rate TEXT NOT NULL,
+                    max_drawdown_krw TEXT NOT NULL,
+                    average_r TEXT NOT NULL,
+                    mae_krw TEXT NOT NULL,
+                    mfe_krw TEXT NOT NULL,
+                    signal_count INTEGER NOT NULL,
+                    blocked_count INTEGER NOT NULL
+                );
                 """
+            )
+            self._ensure_column("positions", "unrealized_pnl", "TEXT NOT NULL DEFAULT '0'")
+            self._ensure_column("positions", "stop_price", "TEXT")
+            self._ensure_column("positions", "target1_price", "TEXT")
+            self._ensure_column("positions", "target2_price", "TEXT")
+            self._ensure_column("positions", "trailing_stop_price", "TEXT")
+            self._ensure_column(
+                "positions", "management_stage", "TEXT NOT NULL DEFAULT 'OPEN'"
+            )
+            self._ensure_column("stop_protections", "stop_price", "TEXT")
+            self._ensure_column("data_quality_states", "last_ticker_received_at", "TEXT")
+            self._ensure_column("data_quality_states", "last_trade_received_at", "TEXT")
+            self._ensure_column("data_quality_states", "last_orderbook_received_at", "TEXT")
+            self._ensure_column("data_quality_states", "last_candle_received_at", "TEXT")
+            self._ensure_column(
+                "reconciliation_state",
+                "operator_resume_required",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
             )
 
 
@@ -719,7 +1132,13 @@ def _row_to_position(row: sqlite3.Row) -> PositionState:
         volume=Decimal(row["volume"]),
         average_entry_price=Decimal(row["average_entry_price"]),
         realized_pnl=Decimal(row["realized_pnl"]),
+        unrealized_pnl=Decimal(row["unrealized_pnl"]),
         stop_protected=bool(row["stop_protected"]),
+        stop_price=_decimal_from_text(row["stop_price"]),
+        target1_price=_decimal_from_text(row["target1_price"]),
+        target2_price=_decimal_from_text(row["target2_price"]),
+        trailing_stop_price=_decimal_from_text(row["trailing_stop_price"]),
+        management_stage=row["management_stage"],
         updated_at=_datetime_from_text(row["updated_at"]),
     )
 
@@ -729,6 +1148,7 @@ def _row_to_stop_protection(row: sqlite3.Row) -> StopProtectionState:
         market=row["market"],
         position_volume=Decimal(row["position_volume"]),
         protected=bool(row["protected"]),
+        stop_price=_decimal_from_text(row["stop_price"]),
         created_at=_datetime_from_text(row["created_at"]),
     )
 
@@ -758,6 +1178,10 @@ def _row_to_alert(row: sqlite3.Row) -> Alert:
 def _row_to_data_quality_state(row: sqlite3.Row) -> DataQualityState:
     last_ws_received_at = row["last_ws_received_at"]
     last_rest_sync_at = row["last_rest_sync_at"]
+    last_ticker_received_at = row["last_ticker_received_at"]
+    last_trade_received_at = row["last_trade_received_at"]
+    last_orderbook_received_at = row["last_orderbook_received_at"]
+    last_candle_received_at = row["last_candle_received_at"]
     return DataQualityState(
         stale=bool(row["stale"]),
         rest_ws_mismatch=bool(row["rest_ws_mismatch"]),
@@ -769,6 +1193,18 @@ def _row_to_data_quality_state(row: sqlite3.Row) -> DataQualityState:
         last_rest_sync_at=None
         if last_rest_sync_at is None
         else _datetime_from_text(last_rest_sync_at),
+        last_ticker_received_at=None
+        if last_ticker_received_at is None
+        else _datetime_from_text(last_ticker_received_at),
+        last_trade_received_at=None
+        if last_trade_received_at is None
+        else _datetime_from_text(last_trade_received_at),
+        last_orderbook_received_at=None
+        if last_orderbook_received_at is None
+        else _datetime_from_text(last_orderbook_received_at),
+        last_candle_received_at=None
+        if last_candle_received_at is None
+        else _datetime_from_text(last_candle_received_at),
     )
 
 
@@ -780,6 +1216,7 @@ def _row_to_reconciliation_state(row: sqlite3.Row) -> ReconciliationState:
         last_checked_at=None
         if last_checked_at is None
         else _datetime_from_text(last_checked_at),
+        operator_resume_required=bool(row["operator_resume_required"]),
     )
 
 
